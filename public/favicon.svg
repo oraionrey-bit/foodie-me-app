@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Foodie Me</title>
+  <rect width="64" height="64" rx="18" fill="#fffefa"/>
+  <path d="M14 28h34l4 10H12l2-10Z" fill="#f6c65f"/>
+  <path d="M18 28h7l-2 10h-8l3-10Zm15 0h7l1 10h-9l1-10Z" fill="#fff2a8"/>
+  <rect x="16" y="36" width="36" height="15" rx="4" fill="#fff8ea" stroke="#4a3560" stroke-width="2"/>
+  <rect x="22" y="40" width="12" height="7" rx="2" fill="#b2dfdb"/>
+  <path d="M27 25c0-7 6-11 13-9 5 1 8 5 8 9H27Z" fill="#86c7ae"/>
+  <circle cx="23" cy="52" r="4" fill="#4a3560"/>
+  <circle cx="45" cy="52" r="4" fill="#4a3560"/>
+</svg>
