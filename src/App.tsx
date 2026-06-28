@@ -29,7 +29,7 @@ function App() {
     <main className="phone-shell">
       <section className="image-hero" aria-label="Foodie Me header image">
         <img
-          src="/images/foodie-me-header-cropped.jpeg"
+          src={`${import.meta.env.BASE_URL}images/foodie-me-header-cropped.jpeg`}
           alt="Cute cream food truck with yellow striped awning, roof plants, and pastel food details"
           className="hero-image"
         />
