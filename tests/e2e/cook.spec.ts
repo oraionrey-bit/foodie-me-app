@@ -7,7 +7,7 @@ test('cook tab renders recipe queue, filters, and detail view', async ({ page })
   await expect(page.getByRole('heading', { name: 'Cook', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'What should we cook next?' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'To try' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('heading', { name: 'Shizuku rainbow tamagoyaki bento' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Curry-flavored grilled mackerel bento' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Loved' }).click()
   await expect(page.getByRole('button', { name: 'Loved' })).toHaveAttribute('aria-pressed', 'true')
@@ -53,7 +53,7 @@ test('bad stored recipes fall back to mock data without crashing', async ({ page
   await page.goto('/')
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Cook', exact: true }).click()
 
-  await expect(page.getByRole('heading', { name: 'Shizuku rainbow tamagoyaki bento' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Curry-flavored grilled mackerel bento' })).toBeVisible()
 })
 
 test('unsupported source URLs are shown as text, not clickable links', async ({ page }) => {
