@@ -355,6 +355,46 @@ button {
   font-weight: 900;
 }
 
+.status-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 0.76rem;
+  font-weight: 900;
+  color: var(--text);
+  background: rgba(255, 248, 225, 0.95);
+}
+
+.status-submitting,
+.status-queued {
+  background: rgba(255, 248, 225, 0.95);
+}
+
+.status-researching {
+  color: #315b52;
+  background: rgba(178, 223, 219, 0.52);
+}
+
+.status-ready {
+  color: #3b315b;
+  background: rgba(209, 196, 233, 0.5);
+}
+
+.status-error {
+  color: #8a214d;
+  background: rgba(252, 228, 236, 0.86);
+}
+
+.quest-status-card {
+  background: rgba(178, 223, 219, 0.18);
+}
+
+.quest-status-card button {
+  width: fit-content;
+}
+
 .quest-results,
 .quest-suggestion-list,
 .source-link-list {
