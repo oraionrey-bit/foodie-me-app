@@ -121,8 +121,8 @@ test('AI Research a quest sends a source-backed quest request to Oraion and show
   await expect(page.getByRole('heading', { name: 'Food quests' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'best sushi omakase in Los Angeles' })).toBeVisible()
   await expect(page.getByText('Prefer west side, dinner date vibe, not too formal.')).toBeVisible()
-  await expect(page.getByText('Reddit')).toBeVisible()
-  await expect(page.getByText('Google/Maps reviews')).toBeVisible()
+  await expect(page.getByText('Reddit', { exact: true })).toBeVisible()
+  await expect(page.getByText('Google/Maps reviews', { exact: true })).toBeVisible()
 
   await expect(page.getByText('Research ready')).toBeVisible()
   await expect(page.getByText('Two west side omakase picks with source links.')).toBeVisible()
