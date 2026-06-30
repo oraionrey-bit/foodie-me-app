@@ -331,7 +331,12 @@ function questStatusClass(status: QuestResearchStatus) {
 }
 
 function isPollableQuest(quest: QuestResearch) {
-  return Boolean(quest.relayId && quest.statusToken && ['submitting', 'queued', 'researching'].includes(quest.status))
+  return Boolean(
+    quest.relayId
+    && quest.statusToken
+    && ['submitting', 'queued', 'researching', 'error'].includes(quest.status)
+    && !quest.result,
+  )
 }
 
 function formatCategory(category: RecipeCategory) {

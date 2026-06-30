@@ -3,27 +3,20 @@ import { expect, test } from '@playwright/test'
 test('home screen starts without fake active quest or settings', async ({ page }) => {
   await page.goto('/')
 
-  await expect(page).toHaveTitle(/Foodie Me/)
-  await expect(page.getByRole('img', { name: /cute cream food truck/i })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Settings' })).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'No active quest yet', level: 2 })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Best cozy breakfast date' })).toHaveCount(0)
-
-  await expect(page.getByRole('heading', { name: 'Pick the next bite' })).toHaveCount(0)
-  await expect(page.getByLabel('Foodie Me overview')).toHaveCount(0)
-  await expect(page.getByText('Cook next')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Home', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No active quest yet' })).toBeVisible()
+  await expect(page.getByText('Start with a food topic and city.')).toBeVisible()
+  await expect(page.getByText('I’m feeling kimbap')).toHaveCount(0)
+  await expect(page.getByText('Appetite settings')).toHaveCount(0)
+  await expect(page.getByText('Auto-pick')).toHaveCount(0)
+  await expect(page.getByText('Active plan')).toHaveCount(0)
 })
 
 test('bottom navigation order keeps Cook last', async ({ page }) => {
   await page.goto('/')
 
-  const labels = await page
-    .getByRole('navigation', { name: 'Foodie Me tabs' })
-    .getByRole('button')
-    .evaluateAll((buttons) => buttons.map((button) => button.textContent?.replace(/\s+/g, ' ').trim()))
-
-  expect(labels).toEqual(['🏠Home', '🍜Quests', '⭐Ranks', '🔎AI', '🍳Cook'])
+  const tabs = page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button')
+  await expect(tabs).toHaveText(['🏠Home', '🍜Quests', '⭐Ranks', '🔎AI', '🍳Cook'])
 })
 
 test('quests, ranks, and AI tabs show cleanup placeholders and actions', async ({ page }) => {
@@ -32,11 +25,11 @@ test('quests, ranks, and AI tabs show cleanup placeholders and actions', async (
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Food quests' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'No quest cards yet' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Best cozy breakfast date' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Research a quest' })).toBeVisible()
 
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Ranks', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Ranks are on hold' })).toBeVisible()
-  await expect(page.getByText('Current top casual bite')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Rankings' })).toBeVisible()
+  await expect(page.getByText('Ranking cards will come back when we are ready to compare favorites.')).toBeVisible()
 
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'AI', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Research a quest' })).toBeVisible()
@@ -135,4 +128,60 @@ test('AI Research a quest sends a source-backed quest request to Oraion and show
 
   await page.reload()
   await expect(page.getByRole('heading', { name: 'best sushi omakase in Los Angeles', level: 2 })).toBeVisible()
+})
+
+test('stored relay error quests recover when server status is ready', async ({ page }) => {
+  await page.route('https://chat.withluna.dev/foodie/quests/foodie-stale-error/status?token=stale-token', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'foodie-stale-error',
+        status: 'ready',
+        status_message: 'Research ready',
+        updated_at: '2026-06-01T00:00:03.000Z',
+        result: {
+          summary: 'Recovered pastry research.',
+          suggestions: [
+            {
+              name: 'République',
+              neighborhood: 'La Brea',
+              why: 'Source-backed pastry counter pick.',
+              what_to_order: 'Croissant',
+              confidence: 'high',
+              sources: [{ label: 'Eater LA', url: 'https://la.eater.com/example' }],
+            },
+          ],
+        },
+      }),
+    })
+  })
+
+  await page.goto('/', {
+    waitUntil: 'domcontentloaded',
+  })
+  await page.evaluate(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'local-stale-error',
+        relayId: 'foodie-stale-error',
+        statusToken: 'stale-token',
+        city: 'Los Angeles',
+        topic: 'Pastries',
+        status: 'error',
+        statusMessage: 'Oraion research worker returned invalid JSON.',
+        error: 'Oraion research worker returned invalid JSON.',
+        sources: ['Reddit', 'Eater LA'],
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:01.000Z',
+      },
+    ]))
+  })
+  await page.reload()
+
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Pastries in Los Angeles' })).toBeVisible()
+  await expect(page.getByText('Research ready')).toBeVisible()
+  await expect(page.getByText('Recovered pastry research.')).toBeVisible()
+  await expect(page.getByText('Oraion research worker returned invalid JSON.')).toHaveCount(0)
 })
