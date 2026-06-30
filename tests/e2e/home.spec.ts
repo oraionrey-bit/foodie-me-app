@@ -99,7 +99,7 @@ test('AI Research a quest sends a source-backed quest request to Oraion and show
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'AI', exact: true }).click()
   await page.getByRole('button', { name: 'Research a quest' }).click()
   await expect(page.getByRole('heading', { name: 'Research a quest' })).toBeVisible()
-  await expect(page.getByText('Oraion will use Reddit, Eater/Infatuation, Google/Maps reviews, Yelp, and local food sources before any restaurant results are saved.')).toBeVisible()
+  await expect(page.getByText('I’ll prioritize Reddit/local chatter + LA editorial guides, then sanity-check reviews. Official restaurant pages are menu/location context only.')).toBeVisible()
 
   await page.getByRole('button', { name: 'Send quest to Oraion' }).click()
   await expect(page.getByRole('alert')).toContainText('Add a food topic and city first.')
@@ -107,19 +107,21 @@ test('AI Research a quest sends a source-backed quest request to Oraion and show
   await page.getByLabel('Food topic').fill('best sushi omakase')
   await page.getByLabel('City').fill('Los Angeles')
   await page.getByLabel('Notes').fill('Prefer west side, dinner date vibe, not too formal.')
-  await expect(page.getByText('Eater LA')).toBeVisible()
-  await expect(page.getByText('The Infatuation LA')).toBeVisible()
+  await expect(page.getByText('Research plan')).toBeVisible()
+  await expect(page.getByText('Reddit/local chatter + city editorial guides first, then review sanity checks. Official pages only help with menu and location context.')).toBeVisible()
   await page.getByRole('button', { name: 'Send quest to Oraion' }).click()
 
   await expect(page.getByRole('heading', { name: 'Food quests' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'best sushi omakase in Los Angeles' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /best sushi omakase in Los Angeles/ })).toBeVisible()
   await expect(page.getByText('Prefer west side, dinner date vibe, not too formal.')).toBeVisible()
-  await expect(page.getByText('Reddit', { exact: true })).toBeVisible()
-  await expect(page.getByText('Google/Maps reviews', { exact: true })).toBeVisible()
+  await expect(page.getByText('Source checklist')).toHaveCount(0)
 
   await expect(page.getByText('Research ready')).toBeVisible()
   await expect(page.getByText('Two west side omakase picks with source links.')).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Sushi Tama' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Sushi Tama/ })).toBeVisible()
+  await expect(page.getByText('Strong reviews for a polished but approachable counter.')).toHaveCount(0)
+  await page.getByRole('button', { name: /Sushi Tama/ }).click()
+  await expect(page.getByText('Strong reviews for a polished but approachable counter.')).toBeVisible()
   await expect(page.getByRole('link', { name: 'Eater LA' })).toHaveAttribute('href', 'https://la.eater.com/example')
 
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Home', exact: true }).click()
@@ -180,8 +182,157 @@ test('stored relay error quests recover when server status is ready', async ({ p
   await page.reload()
 
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Pastries in Los Angeles' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Pastries in Los Angeles/ })).toBeVisible()
   await expect(page.getByText('Research ready')).toBeVisible()
   await expect(page.getByText('Recovered pastry research.')).toBeVisible()
   await expect(page.getByText('Oraion research worker returned invalid JSON.')).toHaveCount(0)
+})
+
+test('stored quests and restaurant suggestions are collapsible', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    const quests = [
+      {
+        id: 'quest-new',
+        city: 'Los Angeles',
+        topic: 'Pizza',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit', 'Eater LA'],
+        createdAt: '2026-06-02T00:00:00.000Z',
+        updatedAt: '2026-06-02T00:00:00.000Z',
+        result: {
+          summary: 'New pizza summary.',
+          suggestions: [
+            {
+              name: 'Quarter Sheets',
+              neighborhood: 'Echo Park',
+              why: 'Crowd-backed pan pizza pick.',
+              what_to_order: 'Sicilian slice',
+              confidence: 'high',
+              sources: [{ label: 'Eater LA', url: 'https://la.eater.com/pizza' }],
+            },
+          ],
+        },
+      },
+      {
+        id: 'quest-old',
+        city: 'Los Angeles',
+        topic: 'Bagels',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit'],
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+        result: {
+          summary: 'Older bagel summary.',
+          suggestions: [{ name: 'Courage Bagels', neighborhood: 'Virgil Village', why: 'Lines and local chatter.' }],
+        },
+      },
+    ]
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify(quests))
+  })
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+
+  await expect(page.getByRole('button', { name: /Pizza in Los Angeles/ })).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByText('New pizza summary.')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Bagels in Los Angeles/ })).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByText('Older bagel summary.')).toHaveCount(0)
+
+  await expect(page.getByRole('button', { name: /Quarter Sheets/ })).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByText('Crowd-backed pan pizza pick.')).toHaveCount(0)
+  await page.getByRole('button', { name: /Quarter Sheets/ }).click()
+  await expect(page.getByRole('button', { name: /Quarter Sheets/ })).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByText('Crowd-backed pan pizza pick.')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Eater LA' })).toBeVisible()
+})
+
+test('restaurant rating persists through questRequests storage', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'quest-rating',
+        city: 'Los Angeles',
+        topic: 'Tacos',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit'],
+        createdAt: '2026-06-03T00:00:00.000Z',
+        updatedAt: '2026-06-03T00:00:00.000Z',
+        result: {
+          summary: 'Taco research.',
+          suggestions: [
+            {
+              name: 'Sonoratown',
+              neighborhood: 'Downtown',
+              why: 'Flour tortilla favorite.',
+              what_to_order: 'Chivichanga',
+              confidence: 'high',
+            },
+          ],
+        },
+      },
+    ]))
+  })
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Sonoratown/ }).click()
+  await page.getByRole('button', { name: 'Want to try' }).click()
+  await page.getByRole('button', { name: '5' }).click()
+  await page.getByLabel('Note').fill('Go after Grand Central Market.')
+
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await expect(page.getByRole('button', { name: /Sonoratown/ })).toContainText('Want to try · 5/5')
+  await page.getByRole('button', { name: /Sonoratown/ }).click()
+  await expect(page.getByLabel('Note')).toHaveValue('Go after Grand Central Market.')
+})
+
+test('duplicate restaurant names keep separate ratings', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'quest-duplicates',
+        city: 'Los Angeles',
+        topic: 'Pizza',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit'],
+        createdAt: '2026-06-04T00:00:00.000Z',
+        updatedAt: '2026-06-04T00:00:00.000Z',
+        result: {
+          summary: 'Duplicate name research.',
+          suggestions: [
+            {
+              name: 'Same Place',
+              neighborhood: 'Downtown',
+              why: 'First location.',
+              what_to_order: 'Slice one',
+              confidence: 'medium',
+            },
+            {
+              name: 'Same Place',
+              neighborhood: 'Downtown',
+              why: 'Second location should not share state.',
+              what_to_order: 'Slice two',
+              confidence: 'medium',
+            },
+          ],
+        },
+      },
+    ]))
+  })
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+
+  const duplicateButtons = page.getByRole('button', { name: /Same Place/ })
+  await expect(duplicateButtons).toHaveCount(2)
+  await duplicateButtons.nth(0).click()
+  await page.getByRole('button', { name: 'Liked' }).click()
+
+  await expect(duplicateButtons.nth(0)).toContainText('Liked')
+  await expect(duplicateButtons.nth(1)).not.toContainText('Liked')
 })
