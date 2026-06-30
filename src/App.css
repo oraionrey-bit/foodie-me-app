@@ -12,7 +12,8 @@
   --border: rgba(179, 136, 255, 0.2);
   --text: #4a3560;
   --muted: #7e6b8f;
-  --tab-inactive: #b0a4c0;
+  --tab-inactive: #5f526c;
+  --tab-active: #5f2fd6;
 }
 
 .phone-shell {
@@ -55,7 +56,6 @@
   margin-bottom: 14px;
 }
 
-.settings-button,
 .tab-page button,
 .hero-card button {
   border: 1px solid rgba(124, 77, 255, 0.16);
@@ -65,11 +65,6 @@
   font-weight: 800;
 }
 
-.settings-button {
-  width: 42px;
-  height: 42px;
-  font-size: 1.1rem;
-}
 
 .eyebrow {
   color: var(--purple);
@@ -235,6 +230,7 @@ button {
 }
 
 .score-row,
+.action-stack,
 .recipe-meta-row,
 .verdict-row,
 .form-actions,
@@ -268,7 +264,7 @@ button {
 
 .segmented {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 5px;
   padding: 5px;
   border: 1px solid var(--border);
@@ -490,8 +486,8 @@ button {
 }
 
 .tab-bar button.active {
-  color: var(--purple);
-  background: rgba(209, 196, 233, 0.42);
+  color: var(--tab-active);
+  background: rgba(209, 196, 233, 0.54);
 }
 
 .tab-bar button.active span {
