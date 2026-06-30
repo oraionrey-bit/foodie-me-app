@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   categoryLabels,
@@ -524,6 +524,33 @@ async function deleteRelayQuest(quest: QuestResearch) {
   })
 }
 
+async function patchRelayQuestRating(quest: QuestResearch, targetSuggestionKey: string, owner: RatingOwner, rating: QuestSuggestionRating) {
+  if (!quest.relayId || !quest.statusToken) throw new Error('Quest is saved on this device only')
+
+  const response = await fetch(`${foodieRelayBaseUrl}/foodie/quests/${encodeURIComponent(quest.relayId)}/ratings?token=${encodeURIComponent(quest.statusToken)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      suggestion_key: targetSuggestionKey,
+      owner,
+      rating,
+    }),
+  })
+
+  const body: unknown = await response.json().catch(() => ({}))
+  if (!response.ok || !isRecord(body)) {
+    throw new Error(isRecord(body) && typeof body.error === 'string' ? body.error : 'Rating sync failed')
+  }
+
+  return {
+    status: normalizeRelayQuestStatus(body.status),
+    statusMessage: typeof body.status_message === 'string' ? body.status_message : undefined,
+    error: typeof body.error === 'string' ? body.error : undefined,
+    result: normalizeQuestResult(body.result),
+    updatedAt: typeof body.updated_at === 'string' ? body.updated_at : new Date().toISOString(),
+  }
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState<TabId>('home')
   const [recipes, setRecipes] = useState<Recipe[]>(loadStoredRecipes)
@@ -541,7 +568,8 @@ function App() {
   const [newQuest, setNewQuest] = useState<NewQuestForm>(blankQuestForm)
   const [questError, setQuestError] = useState('')
   const [confirmingDeleteQuestId, setConfirmingDeleteQuestId] = useState<string | null>(null)
-  const [ratingSaveState, setRatingSaveState] = useState<Record<string, 'saving' | 'saved'>>({})
+  const [ratingSaveState, setRatingSaveState] = useState<Record<string, 'saving' | 'saved' | 'local' | 'error'>>({})
+  const ratingSyncSequenceRef = useRef<Record<string, number>>({})
 
   function persistQuestRequests(nextOrUpdater: QuestResearch[] | ((current: QuestResearch[]) => QuestResearch[])) {
     setQuestRequests((current) => {
@@ -740,7 +768,17 @@ function App() {
   function rateSuggestion(questId: string, targetSuggestionKey: string, owner: RatingOwner, ratingPatch: QuestSuggestionRating) {
     const now = new Date().toISOString()
     const saveKey = `${targetSuggestionKey}-${owner}`
-    setRatingSaveState((current) => ({ ...current, [saveKey]: 'saving' }))
+    const syncSequence = (ratingSyncSequenceRef.current[saveKey] ?? 0) + 1
+    ratingSyncSequenceRef.current[saveKey] = syncSequence
+    const questForSync = questRequests.find((quest) => quest.id === questId)
+    const targetSuggestion = questForSync?.result?.suggestions?.find((suggestion, index) => suggestionKey(questForSync.id, suggestion, index) === targetSuggestionKey)
+    const ratingForSync = {
+      ...targetSuggestion?.ratings?.[owner],
+      ...ratingPatch,
+      updatedAt: now,
+    }
+
+    setRatingSaveState((current) => ({ ...current, [saveKey]: questForSync?.relayId && questForSync.statusToken ? 'saving' : 'local' }))
     persistQuestRequests((current) => current.map((quest) => {
       if (quest.id !== questId || !quest.result?.suggestions) return quest
 
@@ -755,11 +793,7 @@ function App() {
               ...suggestion,
               ratings: {
                 ...suggestion.ratings,
-                [owner]: {
-                  ...suggestion.ratings?.[owner],
-                  ...ratingPatch,
-                  updatedAt: now,
-                },
+                [owner]: ratingForSync,
               },
               rating: undefined,
             }
@@ -767,9 +801,30 @@ function App() {
         },
       }
     }))
-    window.setTimeout(() => {
-      setRatingSaveState((current) => ({ ...current, [saveKey]: 'saved' }))
-    }, 120)
+
+    if (!questForSync?.relayId || !questForSync.statusToken) return
+
+    void patchRelayQuestRating(questForSync, targetSuggestionKey, owner, ratingForSync)
+      .then((remote) => {
+        if (ratingSyncSequenceRef.current[saveKey] !== syncSequence) return
+        persistQuestRequests((current) => current.map((quest) => {
+          if (quest.id !== questId) return quest
+          return {
+            ...quest,
+            status: remote.status,
+            statusMessage: remote.statusMessage,
+            error: remote.error,
+            result: remote.result ?? quest.result,
+            updatedAt: remote.updatedAt,
+            syncedReadyAt: remote.status === 'ready' ? remote.updatedAt : quest.syncedReadyAt,
+          }
+        }))
+        setRatingSaveState((current) => ({ ...current, [saveKey]: 'saved' }))
+      })
+      .catch(() => {
+        if (ratingSyncSequenceRef.current[saveKey] !== syncSequence) return
+        setRatingSaveState((current) => ({ ...current, [saveKey]: 'error' }))
+      })
   }
 
   function requestDeleteQuest(questId: string) {
@@ -1265,7 +1320,19 @@ function App() {
                                                   <div className="rating-owner-card" key={owner}>
                                                     <div className="rating-owner-heading">
                                                       <h4>{ownerLabel}'s take</h4>
-                                                      <span aria-live="polite">{saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved' : 'Saved on this device'}</span>
+                                                      <span aria-live="polite">
+                                                        {saveState === 'saving'
+                                                          ? 'Syncing…'
+                                                          : saveState === 'saved'
+                                                            ? 'Saved'
+                                                            : saveState === 'error'
+                                                              ? 'Sync failed — saved on this device'
+                                                              : saveState === 'local'
+                                                                ? 'Saved on this device'
+                                                                : quest.relayId && quest.statusToken
+                                                                  ? 'Synced through Foodie Me'
+                                                                  : 'Saved on this device'}
+                                                      </span>
                                                     </div>
                                                     <div className="rating-button-row" aria-label={`${ownerLabel} status`}>
                                                       {restaurantRatingStatuses.map((status) => (

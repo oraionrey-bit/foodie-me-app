@@ -372,7 +372,7 @@ test('note-only restaurant rating persists and shows a collapsed badge after rel
   await page.getByRole('button', { name: /Amboy/ }).click()
   await expect(page.getByText('Saved on this device')).toHaveCount(2)
   await page.getByLabel('Tina note').fill('Try the double and fries.')
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  await expect(page.getByText('Saved on this device')).toHaveCount(2)
 
   const storedNote = await page.evaluate(() => {
     const stored = JSON.parse(window.localStorage.getItem('foodie-me-quest-research-v2') || '[]')
@@ -385,6 +385,81 @@ test('note-only restaurant rating persists and shows a collapsed badge after rel
   await expect(page.getByRole('button', { name: /Amboy/ })).toContainText('Tina: note saved')
   await page.getByRole('button', { name: /Amboy/ }).click()
   await expect(page.getByLabel('Tina note')).toHaveValue('Try the double and fries.')
+})
+
+test('relay-backed restaurant notes sync through Foodie relay and survive reload', async ({ page }) => {
+  let patchedNote = ''
+  let patchCalls = 0
+  await page.route('https://chat.withluna.dev/foodie/quests/relay-synced-ratings/ratings?token=sync-token', async (route) => {
+    patchCalls += 1
+    expect(route.request().method()).toBe('PATCH')
+    const body = route.request().postDataJSON() as { suggestion_key: string; owner: string; rating: { notes?: string } }
+    expect(body.suggestion_key).toBe('quest-synced-rating-0-amboy-chinatown')
+    expect(body.owner).toBe('tina')
+    patchedNote = body.rating.notes || ''
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'relay-synced-ratings',
+        status: 'ready',
+        status_message: 'Research ready',
+        updated_at: '2026-06-09T00:01:00.000Z',
+        result: {
+          summary: 'Burger research.',
+          suggestions: [{ name: 'Amboy', neighborhood: 'Chinatown', why: 'Burger counter favorite.', ratings: { tina: { notes: patchedNote, updatedAt: '2026-06-09T00:01:00.000Z' } } }],
+        },
+      }),
+    })
+  })
+  await page.route('https://chat.withluna.dev/foodie/quests/relay-synced-ratings/status?token=sync-token', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'relay-synced-ratings',
+        status: 'ready',
+        status_message: 'Research ready',
+        updated_at: '2026-06-09T00:01:00.000Z',
+        result: {
+          summary: 'Burger research.',
+          suggestions: [{ name: 'Amboy', neighborhood: 'Chinatown', why: 'Burger counter favorite.', ratings: { tina: { notes: patchedNote, updatedAt: '2026-06-09T00:01:00.000Z' } } }],
+        },
+      }),
+    })
+  })
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'quest-synced-rating',
+        relayId: 'relay-synced-ratings',
+        statusToken: 'sync-token',
+        city: 'Los Angeles',
+        topic: 'Burgers',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit'],
+        createdAt: '2026-06-09T00:00:00.000Z',
+        updatedAt: '2026-06-09T00:00:00.000Z',
+        syncedReadyAt: '2026-06-09T00:00:00.000Z',
+        result: { summary: 'Burger research.', suggestions: [{ name: 'Amboy', neighborhood: 'Chinatown', why: 'Burger counter favorite.' }] },
+      },
+    ]))
+  })
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Amboy/ }).click()
+  await expect(page.getByText('Synced through Foodie Me')).toHaveCount(2)
+  await page.getByLabel('Tina note').fill('Relay synced note.')
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+  await expect.poll(() => patchCalls).toBeGreaterThan(0)
+
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Amboy/ }).click()
+  await expect(page.getByLabel('Tina note')).toHaveValue('Relay synced note.')
 })
 
 test('ready quests do one background refresh and keep local ratings', async ({ page }) => {
