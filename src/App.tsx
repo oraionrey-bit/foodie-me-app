@@ -22,14 +22,38 @@ type NewRecipeForm = {
   category: RecipeCategory
 }
 
-type QuestResearchStatus = 'needs_research'
+type QuestResearchStatus = 'local' | 'submitting' | 'queued' | 'researching' | 'ready' | 'error'
+
+type QuestSourceLink = {
+  label: string
+  url: string
+}
+
+type QuestSuggestion = {
+  name: string
+  neighborhood?: string
+  why?: string
+  what_to_order?: string
+  confidence?: string
+  sources?: QuestSourceLink[]
+}
+
+type QuestResult = {
+  summary?: string
+  suggestions?: QuestSuggestion[]
+}
 
 type QuestResearch = {
   id: string
+  relayId?: string
+  statusToken?: string
   city: string
   topic: string
   notes?: string
   status: QuestResearchStatus
+  statusMessage?: string
+  error?: string
+  result?: QuestResult
   createdAt: string
   updatedAt: string
   sources: string[]
@@ -57,7 +81,9 @@ const statusFilters: Array<{ id: RecipeStatus; label: string }> = [
 const sourceTypes: RecipeSourceType[] = ['website', 'youtube', 'tiktok', 'instagram', 'photo', 'cookbook', 'manual']
 const storageKey = 'foodie-me-recipes-v2'
 const legacyStorageKey = 'foodie-me-recipes-v1'
-const questResearchStorageKey = 'foodie-me-quest-research-v1'
+const questResearchStorageKey = 'foodie-me-quest-research-v2'
+const legacyQuestResearchStorageKey = 'foodie-me-quest-research-v1'
+const foodieRelayBaseUrl = (import.meta.env.VITE_FOODIE_RELAY_URL || 'https://chat.withluna.dev').replace(/\/$/, '')
 const recipeStatuses: RecipeStatus[] = ['to_try', 'loved']
 const legacyMockRecipeIds = new Set([
   'cozy-tomato-bean-skillet',
@@ -177,6 +203,45 @@ function normalizeQuestSources(value: unknown, city: string) {
   return normalized.length > 0 ? normalized : defaultQuestSources(city)
 }
 
+function normalizeQuestSourceLinks(value: unknown): QuestSourceLink[] {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .filter(isRecord)
+    .map((source) => ({
+      label: typeof source.label === 'string' && source.label.trim() ? source.label.trim() : 'Source',
+      url: typeof source.url === 'string' ? safeExternalUrl(source.url) : undefined,
+    }))
+    .filter((source): source is QuestSourceLink => Boolean(source.url))
+}
+
+function normalizeQuestResult(value: unknown): QuestResult | undefined {
+  if (!isRecord(value)) return undefined
+
+  const suggestions = Array.isArray(value.suggestions)
+    ? value.suggestions
+        .filter(isRecord)
+        .map((suggestion) => ({
+          name: typeof suggestion.name === 'string' ? suggestion.name.trim() : '',
+          neighborhood: typeof suggestion.neighborhood === 'string' && suggestion.neighborhood.trim() ? suggestion.neighborhood.trim() : undefined,
+          why: typeof suggestion.why === 'string' && suggestion.why.trim() ? suggestion.why.trim() : undefined,
+          what_to_order: typeof suggestion.what_to_order === 'string' && suggestion.what_to_order.trim() ? suggestion.what_to_order.trim() : undefined,
+          confidence: typeof suggestion.confidence === 'string' && suggestion.confidence.trim() ? suggestion.confidence.trim() : undefined,
+          sources: normalizeQuestSourceLinks(suggestion.sources),
+        }))
+        .filter((suggestion) => suggestion.name)
+    : []
+
+  const summary = typeof value.summary === 'string' && value.summary.trim() ? value.summary.trim() : undefined
+  return summary || suggestions.length > 0 ? { summary, suggestions } : undefined
+}
+
+function normalizeQuestStatus(value: unknown): QuestResearchStatus {
+  const allowed: QuestResearchStatus[] = ['local', 'submitting', 'queued', 'researching', 'ready', 'error']
+  if (value === 'needs_research') return 'local'
+  return allowed.includes(value as QuestResearchStatus) ? (value as QuestResearchStatus) : 'local'
+}
+
 function normalizeStoredQuestResearch(value: unknown): QuestResearch | null {
   if (!isRecord(value)) return null
 
@@ -188,10 +253,15 @@ function normalizeStoredQuestResearch(value: unknown): QuestResearch | null {
 
   return {
     id: typeof value.id === 'string' && value.id.trim() ? value.id : `quest-${crypto.randomUUID()}`,
+    relayId: typeof value.relayId === 'string' && value.relayId.trim() ? value.relayId : undefined,
+    statusToken: typeof value.statusToken === 'string' && value.statusToken.trim() ? value.statusToken : undefined,
     city,
     topic,
     notes: typeof value.notes === 'string' && value.notes.trim() ? value.notes.trim() : undefined,
-    status: 'needs_research',
+    status: normalizeQuestStatus(value.status),
+    statusMessage: typeof value.statusMessage === 'string' && value.statusMessage.trim() ? value.statusMessage.trim() : undefined,
+    error: typeof value.error === 'string' && value.error.trim() ? value.error.trim() : undefined,
+    result: normalizeQuestResult(value.result),
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : now,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : now,
     sources: normalizeQuestSources(value.sources, city),
@@ -237,14 +307,27 @@ function loadStoredRecipes() {
 function loadStoredQuestResearchRequests() {
   try {
     const stored = window.localStorage.getItem(questResearchStorageKey)
-    return stored ? normalizeStoredQuestResearchRequests(JSON.parse(stored)) : []
+    if (stored) return normalizeStoredQuestResearchRequests(JSON.parse(stored))
+
+    const legacyStored = window.localStorage.getItem(legacyQuestResearchStorageKey)
+    return legacyStored ? normalizeStoredQuestResearchRequests(JSON.parse(legacyStored)) : []
   } catch {
     return []
   }
 }
 
-function questStatusLabel(status: QuestResearchStatus) {
-  if (status === 'needs_research') return 'Ready for source-backed research'
+function questStatusLabel(status: QuestResearchStatus, statusMessage?: string) {
+  if (statusMessage) return statusMessage
+  if (status === 'local') return 'Saved locally — send to Oraion when ready'
+  if (status === 'submitting') return 'Sending quest to Oraion...'
+  if (status === 'queued') return 'Queued for Oraion research'
+  if (status === 'researching') return 'Oraion is researching source-backed picks'
+  if (status === 'ready') return 'Research ready'
+  return 'Research hit an error'
+}
+
+function isPollableQuest(quest: QuestResearch) {
+  return Boolean(quest.relayId && quest.statusToken && ['submitting', 'queued', 'researching'].includes(quest.status))
 }
 
 function formatCategory(category: RecipeCategory) {
@@ -258,6 +341,56 @@ function sourceLabel(recipe: Recipe) {
 function recipeMeta(recipe: Recipe) {
   const parts = [recipe.totalMinutes ? `${recipe.totalMinutes} min` : undefined, recipe.yield, recipe.categories[0] ? formatCategory(recipe.categories[0]) : undefined]
   return parts.filter(Boolean).join(' · ')
+}
+
+function normalizeRelayQuestStatus(value: unknown): QuestResearchStatus {
+  const status = normalizeQuestStatus(value)
+  return status === 'local' ? 'queued' : status
+}
+
+async function submitQuestToRelay(quest: QuestResearch) {
+  const response = await fetch(`${foodieRelayBaseUrl}/foodie/quests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      topic: quest.topic,
+      city: quest.city,
+      notes: quest.notes || '',
+      sources: quest.sources,
+      client_request_id: quest.id,
+    }),
+  })
+
+  const body: unknown = await response.json().catch(() => ({}))
+  if (!response.ok || !isRecord(body)) {
+    throw new Error(isRecord(body) && typeof body.error === 'string' ? body.error : 'Quest relay request failed')
+  }
+
+  return {
+    relayId: typeof body.id === 'string' ? body.id : '',
+    statusToken: typeof body.status_token === 'string' ? body.status_token : '',
+    status: normalizeRelayQuestStatus(body.status),
+    statusMessage: typeof body.status_message === 'string' ? body.status_message : undefined,
+    updatedAt: typeof body.updated_at === 'string' ? body.updated_at : new Date().toISOString(),
+  }
+}
+
+async function fetchQuestStatus(quest: QuestResearch) {
+  if (!quest.relayId || !quest.statusToken) throw new Error('Missing relay quest details')
+
+  const response = await fetch(`${foodieRelayBaseUrl}/foodie/quests/${encodeURIComponent(quest.relayId)}/status?token=${encodeURIComponent(quest.statusToken)}`)
+  const body: unknown = await response.json().catch(() => ({}))
+  if (!response.ok || !isRecord(body)) {
+    throw new Error(isRecord(body) && typeof body.error === 'string' ? body.error : 'Quest status request failed')
+  }
+
+  return {
+    status: normalizeRelayQuestStatus(body.status),
+    statusMessage: typeof body.status_message === 'string' ? body.status_message : undefined,
+    error: typeof body.error === 'string' ? body.error : undefined,
+    result: normalizeQuestResult(body.result),
+    updatedAt: typeof body.updated_at === 'string' ? body.updated_at : new Date().toISOString(),
+  }
 }
 
 function App() {
@@ -310,6 +443,50 @@ function App() {
     }
   }, [questRequests])
 
+  useEffect(() => {
+    const pollableQuests = questRequests.filter(isPollableQuest)
+    if (pollableQuests.length === 0) return undefined
+
+    let cancelled = false
+    async function pollQuestStatuses() {
+      const updates = await Promise.allSettled(
+        pollableQuests.map(async (quest) => ({ questId: quest.id, status: await fetchQuestStatus(quest) })),
+      )
+      if (cancelled) return
+
+      setQuestRequests((current) => current.map((quest) => {
+        const update = updates.find((item) => item.status === 'fulfilled' && item.value.questId === quest.id)
+        if (update?.status !== 'fulfilled') return quest
+        const next = update.value.status
+        if (
+          quest.status === next.status
+          && quest.statusMessage === next.statusMessage
+          && quest.error === next.error
+          && quest.result === (next.result ?? quest.result)
+          && quest.updatedAt === next.updatedAt
+        ) return quest
+        return {
+          ...quest,
+          status: next.status,
+          statusMessage: next.statusMessage,
+          error: next.error,
+          result: next.result ?? quest.result,
+          updatedAt: next.updatedAt,
+        }
+      }))
+    }
+
+    pollQuestStatuses().catch(() => {})
+    const interval = window.setInterval(() => {
+      pollQuestStatuses().catch(() => {})
+    }, 9000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [questRequests])
+
   function openCookTab(showForm = false) {
     setActiveTab('cook')
     setSelectedRecipeId(null)
@@ -321,6 +498,57 @@ function App() {
     setSelectedRecipeId(null)
     setShowQuestForm(showForm)
     setQuestError('')
+  }
+
+  async function sendQuestToOraion(quest: QuestResearch) {
+    setQuestRequests((current) => current.map((item) => (
+      item.id === quest.id
+        ? {
+            ...item,
+            relayId: undefined,
+            statusToken: undefined,
+            result: undefined,
+            status: 'submitting',
+            statusMessage: 'Sending quest to Oraion...',
+            error: undefined,
+            updatedAt: new Date().toISOString(),
+          }
+        : item
+    )))
+
+    try {
+      const relay = await submitQuestToRelay(quest)
+      if (!relay.relayId || !relay.statusToken) throw new Error('Relay response was missing quest tracking details')
+      setQuestRequests((current) => current.map((item) => (
+        item.id === quest.id
+          ? {
+              ...item,
+              relayId: relay.relayId,
+              statusToken: relay.statusToken,
+              status: relay.status,
+              statusMessage: relay.statusMessage,
+              error: undefined,
+              updatedAt: relay.updatedAt,
+            }
+          : item
+      )))
+    } catch (error) {
+      setQuestRequests((current) => current.map((item) => (
+        item.id === quest.id
+          ? {
+              ...item,
+              status: 'error',
+              statusMessage: 'Could not send quest to Oraion.',
+              error: error instanceof Error ? error.message : 'Quest relay request failed',
+              updatedAt: new Date().toISOString(),
+            }
+          : item
+      )))
+    }
+  }
+
+  function retryQuestSend(quest: QuestResearch) {
+    void sendQuestToOraion({ ...quest, relayId: undefined, statusToken: undefined, result: undefined })
   }
 
   function handleAddQuest(event: FormEvent<HTMLFormElement>) {
@@ -340,7 +568,8 @@ function App() {
       topic,
       city,
       notes: newQuest.notes.trim() || undefined,
-      status: 'needs_research',
+      status: 'submitting',
+      statusMessage: 'Sending quest to Oraion...',
       createdAt: now,
       updatedAt: now,
       sources: defaultQuestSources(city),
@@ -351,6 +580,7 @@ function App() {
     setQuestError('')
     setShowQuestForm(false)
     setActiveTab('quests')
+    void sendQuestToOraion(quest)
   }
 
   function handleAddRecipe(event: FormEvent<HTMLFormElement>) {
@@ -452,7 +682,7 @@ function App() {
                 <div>
                   <p className="eyebrow">Active quest</p>
                   <h2>{activeQuestRequest.topic} in {activeQuestRequest.city}</h2>
-                  <p>{questStatusLabel(activeQuestRequest.status)}</p>
+                  <p>{questStatusLabel(activeQuestRequest.status, activeQuestRequest.statusMessage)}</p>
                 </div>
                 <span className="pill">{activeQuestRequest.city}</span>
               </article>
@@ -671,8 +901,41 @@ function App() {
                     </div>
                     <div>
                       <h3>{quest.topic} in {quest.city}</h3>
-                      <p>{questStatusLabel(quest.status)}</p>
+                      <p>{questStatusLabel(quest.status, quest.statusMessage)}</p>
+                      {quest.error && <p className="form-error" role="alert">{quest.error}</p>}
                     </div>
+                    {(quest.status === 'error' || quest.status === 'local') && (
+                      <div className="form-actions">
+                        <button type="button" onClick={() => retryQuestSend(quest)}>{quest.status === 'local' ? 'Send to Oraion' : 'Retry send'}</button>
+                      </div>
+                    )}
+                    {quest.result && (
+                      <section className="quest-results" aria-label="Quest research results">
+                        {quest.result.summary && <p>{quest.result.summary}</p>}
+                        {quest.result.suggestions && quest.result.suggestions.length > 0 && (
+                          <div className="quest-suggestion-list">
+                            {quest.result.suggestions.map((suggestion) => (
+                              <article className="quest-suggestion" key={`${quest.id}-${suggestion.name}`}>
+                                <div className="detail-topline">
+                                  <h3>{suggestion.name}</h3>
+                                  {suggestion.confidence && <span className="pill">{suggestion.confidence} confidence</span>}
+                                </div>
+                                {suggestion.neighborhood && <p className="eyebrow">{suggestion.neighborhood}</p>}
+                                {suggestion.why && <p>{suggestion.why}</p>}
+                                {suggestion.what_to_order && <p><strong>Order:</strong> {suggestion.what_to_order}</p>}
+                                {suggestion.sources && suggestion.sources.length > 0 && (
+                                  <div className="source-link-list" aria-label={`${suggestion.name} sources`}>
+                                    {suggestion.sources.map((source) => (
+                                      <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label}</a>
+                                    ))}
+                                  </div>
+                                )}
+                              </article>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    )}
                     {quest.notes && (
                       <section className="quest-notes" aria-label="Quest notes">
                         <h3>Notes</h3>
@@ -767,7 +1030,7 @@ function App() {
                 </section>
                 {questError && <p className="form-error" role="alert">{questError}</p>}
                 <div className="form-actions">
-                  <button type="submit">Add quest for research</button>
+                  <button type="submit">Send quest to Oraion</button>
                   <button type="button" onClick={() => { setShowQuestForm(false); setQuestError('') }}>Cancel</button>
                 </div>
               </form>
