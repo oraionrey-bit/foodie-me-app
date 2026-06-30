@@ -326,6 +326,10 @@ function questStatusLabel(status: QuestResearchStatus, statusMessage?: string) {
   return 'Research hit an error'
 }
 
+function questStatusClass(status: QuestResearchStatus) {
+  return `status-badge status-${status}`
+}
+
 function isPollableQuest(quest: QuestResearch) {
   return Boolean(quest.relayId && quest.statusToken && ['submitting', 'queued', 'researching'].includes(quest.status))
 }
@@ -682,7 +686,7 @@ function App() {
                 <div>
                   <p className="eyebrow">Active quest</p>
                   <h2>{activeQuestRequest.topic} in {activeQuestRequest.city}</h2>
-                  <p>{questStatusLabel(activeQuestRequest.status, activeQuestRequest.statusMessage)}</p>
+                  <span className={questStatusClass(activeQuestRequest.status)}>{questStatusLabel(activeQuestRequest.status, activeQuestRequest.statusMessage)}</span>
                 </div>
                 <span className="pill">{activeQuestRequest.city}</span>
               </article>
@@ -897,11 +901,11 @@ function App() {
                   <article className="card quest-card" key={quest.id}>
                     <div className="detail-topline">
                       <p className="eyebrow">Quest request</p>
-                      <span className="pill">{quest.city}</span>
+                      <span className={questStatusClass(quest.status)}>{questStatusLabel(quest.status, quest.statusMessage)}</span>
                     </div>
                     <div>
                       <h3>{quest.topic} in {quest.city}</h3>
-                      <p>{questStatusLabel(quest.status, quest.statusMessage)}</p>
+                      <p>{quest.city}</p>
                       {quest.error && <p className="form-error" role="alert">{quest.error}</p>}
                     </div>
                     {(quest.status === 'error' || quest.status === 'local') && (
@@ -1034,6 +1038,18 @@ function App() {
                   <button type="button" onClick={() => { setShowQuestForm(false); setQuestError('') }}>Cancel</button>
                 </div>
               </form>
+            )}
+
+            {activeQuestRequest && (
+              <article className="card quest-status-card" aria-label="Latest quest status">
+                <div className="detail-topline">
+                  <p className="eyebrow">Latest quest status</p>
+                  <span className={questStatusClass(activeQuestRequest.status)}>{questStatusLabel(activeQuestRequest.status, activeQuestRequest.statusMessage)}</span>
+                </div>
+                <h3>{activeQuestRequest.topic} in {activeQuestRequest.city}</h3>
+                <p>Foodie Me checks this every few seconds. You do not need to refresh; open Quests for the full card and results.</p>
+                <button type="button" onClick={() => setActiveTab('quests')}>Open quest card</button>
+              </article>
             )}
           </section>
         )}
