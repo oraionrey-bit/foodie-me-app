@@ -1,7 +1,6 @@
 import type { FormEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { quests } from './data/mockFoodie'
 import {
   categoryLabels,
   mockRecipes,
@@ -23,6 +22,25 @@ type NewRecipeForm = {
   category: RecipeCategory
 }
 
+type QuestResearchStatus = 'needs_research'
+
+type QuestResearch = {
+  id: string
+  city: string
+  topic: string
+  notes?: string
+  status: QuestResearchStatus
+  createdAt: string
+  updatedAt: string
+  sources: string[]
+}
+
+type NewQuestForm = {
+  topic: string
+  city: string
+  notes: string
+}
+
 const tabs: Array<{ id: TabId; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: '🏠' },
   { id: 'quests', label: 'Quests', icon: '🍜' },
@@ -39,6 +57,7 @@ const statusFilters: Array<{ id: RecipeStatus; label: string }> = [
 const sourceTypes: RecipeSourceType[] = ['website', 'youtube', 'tiktok', 'instagram', 'photo', 'cookbook', 'manual']
 const storageKey = 'foodie-me-recipes-v2'
 const legacyStorageKey = 'foodie-me-recipes-v1'
+const questResearchStorageKey = 'foodie-me-quest-research-v1'
 const recipeStatuses: RecipeStatus[] = ['to_try', 'loved']
 const legacyMockRecipeIds = new Set([
   'cozy-tomato-bean-skillet',
@@ -53,6 +72,19 @@ const blankForm: NewRecipeForm = {
   sourceType: 'website',
   note: '',
   category: 'weeknight',
+}
+
+const blankQuestForm: NewQuestForm = {
+  topic: '',
+  city: '',
+  notes: '',
+}
+
+function defaultQuestSources(city: string) {
+  const normalizedCity = city.trim().toLowerCase().replace(/\./g, '')
+  const isLosAngeles = /(^|[\s,])la($|[\s,])/.test(normalizedCity) || normalizedCity.includes('los angeles')
+  const editorialSources = isLosAngeles ? ['Eater LA', 'The Infatuation LA'] : ['Eater/Infatuation if they cover the city']
+  return ['Reddit', ...editorialSources, 'Google Search', 'Google/Maps reviews', 'Yelp', 'Local food sources']
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -138,6 +170,40 @@ function normalizeStoredRecipes(value: unknown, options: { dropInvalidStatus?: b
   return normalized.length > 0 ? normalized : mockRecipes
 }
 
+function normalizeQuestSources(value: unknown, city: string) {
+  if (!Array.isArray(value)) return defaultQuestSources(city)
+
+  const normalized = value.filter((source): source is string => typeof source === 'string' && source.trim().length > 0).map((source) => source.trim())
+  return normalized.length > 0 ? normalized : defaultQuestSources(city)
+}
+
+function normalizeStoredQuestResearch(value: unknown): QuestResearch | null {
+  if (!isRecord(value)) return null
+
+  const city = typeof value.city === 'string' ? value.city.trim() : ''
+  const topic = typeof value.topic === 'string' ? value.topic.trim() : ''
+  if (!city || !topic) return null
+
+  const now = new Date().toISOString()
+
+  return {
+    id: typeof value.id === 'string' && value.id.trim() ? value.id : `quest-${crypto.randomUUID()}`,
+    city,
+    topic,
+    notes: typeof value.notes === 'string' && value.notes.trim() ? value.notes.trim() : undefined,
+    status: 'needs_research',
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt : now,
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : now,
+    sources: normalizeQuestSources(value.sources, city),
+  }
+}
+
+function normalizeStoredQuestResearchRequests(value: unknown) {
+  if (!Array.isArray(value)) return []
+
+  return value.map(normalizeStoredQuestResearch).filter((quest): quest is QuestResearch => quest !== null)
+}
+
 function safeExternalUrl(value?: string) {
   if (!value) return undefined
 
@@ -168,6 +234,19 @@ function loadStoredRecipes() {
   }
 }
 
+function loadStoredQuestResearchRequests() {
+  try {
+    const stored = window.localStorage.getItem(questResearchStorageKey)
+    return stored ? normalizeStoredQuestResearchRequests(JSON.parse(stored)) : []
+  } catch {
+    return []
+  }
+}
+
+function questStatusLabel(status: QuestResearchStatus) {
+  if (status === 'needs_research') return 'Ready for source-backed research'
+}
+
 function formatCategory(category: RecipeCategory) {
   return categoryLabels[category]
 }
@@ -190,8 +269,11 @@ function App() {
   const [showSaveForm, setShowSaveForm] = useState(false)
   const [newRecipe, setNewRecipe] = useState<NewRecipeForm>(blankForm)
   const [formError, setFormError] = useState('')
+  const [questRequests, setQuestRequests] = useState<QuestResearch[]>(loadStoredQuestResearchRequests)
+  const [showQuestForm, setShowQuestForm] = useState(false)
+  const [newQuest, setNewQuest] = useState<NewQuestForm>(blankQuestForm)
+  const [questError, setQuestError] = useState('')
 
-  const featuredQuest = quests[0]
   const title = useMemo(() => {
     if (activeTab === 'home') return 'Home'
     if (activeTab === 'cook') return 'Cook'
@@ -204,6 +286,7 @@ function App() {
   const lovedCount = recipes.filter((recipe) => recipe.status === 'loved').length
   const selectedRecipe = recipes.find((recipe) => recipe.id === selectedRecipeId) ?? null
   const selectedRecipeSafeSourceUrl = safeExternalUrl(selectedRecipe?.sourceUrl)
+  const activeQuestRequest = questRequests[0] ?? null
 
   const visibleRecipes = recipes.filter((recipe) => {
     const statusMatches = recipe.status === statusFilter
@@ -219,10 +302,55 @@ function App() {
     }
   }, [recipes])
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(questResearchStorageKey, JSON.stringify(questRequests))
+    } catch {
+      // Keep the static app usable even if quest storage is unavailable.
+    }
+  }, [questRequests])
+
   function openCookTab(showForm = false) {
     setActiveTab('cook')
     setSelectedRecipeId(null)
     setShowSaveForm(showForm)
+  }
+
+  function openResearchTab(showForm = false) {
+    setActiveTab('research')
+    setSelectedRecipeId(null)
+    setShowQuestForm(showForm)
+    setQuestError('')
+  }
+
+  function handleAddQuest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const topic = newQuest.topic.trim()
+    const city = newQuest.city.trim()
+
+    if (!topic || !city) {
+      setQuestError('Add a food topic and city first.')
+      return
+    }
+
+    const now = new Date().toISOString()
+    const quest: QuestResearch = {
+      id: `quest-${Date.now()}`,
+      topic,
+      city,
+      notes: newQuest.notes.trim() || undefined,
+      status: 'needs_research',
+      createdAt: now,
+      updatedAt: now,
+      sources: defaultQuestSources(city),
+    }
+
+    setQuestRequests((current) => [quest, ...current])
+    setNewQuest(blankQuestForm)
+    setQuestError('')
+    setShowQuestForm(false)
+    setActiveTab('quests')
   }
 
   function handleAddRecipe(event: FormEvent<HTMLFormElement>) {
@@ -319,14 +447,23 @@ function App() {
 
         {activeTab === 'home' && (
           <section className="tab-page" aria-label="Home dashboard">
-            <article className="card compact-card">
-              <div>
+            {activeQuestRequest ? (
+              <article className="card compact-card">
+                <div>
+                  <p className="eyebrow">Active quest</p>
+                  <h2>{activeQuestRequest.topic} in {activeQuestRequest.city}</h2>
+                  <p>{questStatusLabel(activeQuestRequest.status)}</p>
+                </div>
+                <span className="pill">{activeQuestRequest.city}</span>
+              </article>
+            ) : (
+              <article className="card empty-state">
                 <p className="eyebrow">Active quest</p>
-                <h2>{featuredQuest.title}</h2>
-                <p>{featuredQuest.progress}</p>
-              </div>
-              <span className="pill">{featuredQuest.city}</span>
-            </article>
+                <h2>No active quest yet</h2>
+                <p>Start with a food topic and city. Foodie Me will save the request for source-backed research, not fake restaurant results.</p>
+                <button type="button" onClick={() => openResearchTab(true)}>Research a quest</button>
+              </article>
+            )}
           </section>
         )}
 
@@ -524,11 +661,43 @@ function App() {
 
         {activeTab === 'quests' && (
           <section className="tab-page" aria-label="Food quests">
-            <article className="card empty-state">
-              <p className="eyebrow">Quests</p>
-              <h3>No quest cards yet</h3>
-              <p>We’ll keep the active quest on Home for now while this space gets cleaned up.</p>
-            </article>
+            {questRequests.length > 0 ? (
+              <div className="quest-list">
+                {questRequests.map((quest) => (
+                  <article className="card quest-card" key={quest.id}>
+                    <div className="detail-topline">
+                      <p className="eyebrow">Quest request</p>
+                      <span className="pill">{quest.city}</span>
+                    </div>
+                    <div>
+                      <h3>{quest.topic} in {quest.city}</h3>
+                      <p>{questStatusLabel(quest.status)}</p>
+                    </div>
+                    {quest.notes && (
+                      <section className="quest-notes" aria-label="Quest notes">
+                        <h3>Notes</h3>
+                        <p>{quest.notes}</p>
+                      </section>
+                    )}
+                    <section className="quest-sources" aria-label="Source checklist">
+                      <h3>Source checklist</h3>
+                      <ul>
+                        {quest.sources.map((source) => (
+                          <li key={source}>{source}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <article className="card empty-state">
+                <p className="eyebrow">Quests</p>
+                <h3>No quest cards yet</h3>
+                <p>Research a quest from the AI tab to save a source-backed restaurant request here.</p>
+                <button type="button" onClick={() => openResearchTab(true)}>Research a quest</button>
+              </article>
+            )}
           </section>
         )}
 
@@ -549,10 +718,60 @@ function App() {
               <h3>What should AI help with?</h3>
               <p>Research a future quest or capture a recipe from YouTube, a link, a blog, Instagram, and more.</p>
               <div className="action-stack">
-                <button type="button">Research a quest</button>
+                <button type="button" onClick={() => setShowQuestForm(true)}>Research a quest</button>
                 <button type="button" onClick={() => openCookTab(true)}>Save recipe</button>
               </div>
             </article>
+
+            {showQuestForm && (
+              <form className="card save-recipe-form quest-research-form" onSubmit={handleAddQuest} noValidate>
+                <div>
+                  <p className="eyebrow">Source-backed research</p>
+                  <h3>Research a quest</h3>
+                  <p>Oraion will use Reddit, Eater/Infatuation, Google/Maps reviews, Yelp, and local food sources before any restaurant results are saved.</p>
+                </div>
+                <label htmlFor="quest-topic-input">
+                  Food topic
+                  <input
+                    id="quest-topic-input"
+                    value={newQuest.topic}
+                    onChange={(event) => setNewQuest((current) => ({ ...current, topic: event.target.value }))}
+                    placeholder="e.g. crispy tacos, cozy bakeries"
+                  />
+                </label>
+                <label htmlFor="quest-city-input">
+                  City
+                  <input
+                    id="quest-city-input"
+                    value={newQuest.city}
+                    onChange={(event) => setNewQuest((current) => ({ ...current, city: event.target.value }))}
+                    placeholder="e.g. Los Angeles"
+                  />
+                </label>
+                <label htmlFor="quest-notes-input">
+                  Notes
+                  <textarea
+                    id="quest-notes-input"
+                    value={newQuest.notes}
+                    onChange={(event) => setNewQuest((current) => ({ ...current, notes: event.target.value }))}
+                    placeholder="Neighborhoods, vibes, budget, dietary notes, or must-avoid spots"
+                  />
+                </label>
+                <section className="quest-sources" aria-label="Default source checklist">
+                  <h3>Default source checklist</h3>
+                  <ul>
+                    {defaultQuestSources(newQuest.city).map((source) => (
+                      <li key={source}>{source}</li>
+                    ))}
+                  </ul>
+                </section>
+                {questError && <p className="form-error" role="alert">{questError}</p>}
+                <div className="form-actions">
+                  <button type="submit">Add quest for research</button>
+                  <button type="button" onClick={() => { setShowQuestForm(false); setQuestError('') }}>Cancel</button>
+                </div>
+              </form>
+            )}
           </section>
         )}
       </section>
