@@ -16,6 +16,7 @@
 
 html {
   min-width: 320px;
+  overflow-x: clip;
   background: #fffefa;
 }
 
@@ -23,6 +24,7 @@ body {
   min-width: 320px;
   min-height: 100svh;
   margin: 0;
+  overflow-x: clip;
   background: #fffefa;
 }
 
