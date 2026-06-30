@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
-import { nextPlaces, quests, rankings } from './data/mockFoodie'
+import { quests } from './data/mockFoodie'
 import {
   categoryLabels,
   mockRecipes,
@@ -25,22 +25,27 @@ type NewRecipeForm = {
 
 const tabs: Array<{ id: TabId; label: string; icon: string }> = [
   { id: 'home', label: 'Home', icon: '🏠' },
-  { id: 'cook', label: 'Cook', icon: '🍳' },
   { id: 'quests', label: 'Quests', icon: '🍜' },
   { id: 'rankings', label: 'Ranks', icon: '⭐' },
   { id: 'research', label: 'AI', icon: '🔎' },
+  { id: 'cook', label: 'Cook', icon: '🍳' },
 ]
 
 const statusFilters: Array<{ id: RecipeStatus; label: string }> = [
   { id: 'to_try', label: 'To try' },
   { id: 'loved', label: 'Loved' },
-  { id: 'cooked', label: 'Cooked' },
-  { id: 'archived', label: 'Archived' },
 ]
 
 const sourceTypes: RecipeSourceType[] = ['website', 'youtube', 'tiktok', 'instagram', 'photo', 'cookbook', 'manual']
-const storageKey = 'foodie-me-recipes-v1'
-const recipeStatuses: RecipeStatus[] = ['to_try', 'cooked', 'loved', 'archived']
+const storageKey = 'foodie-me-recipes-v2'
+const legacyStorageKey = 'foodie-me-recipes-v1'
+const recipeStatuses: RecipeStatus[] = ['to_try', 'loved']
+const legacyMockRecipeIds = new Set([
+  'cozy-tomato-bean-skillet',
+  'golden-miso-pancakes',
+  'chili-crisp-noodle-salad',
+  'lavender-cloud-cookies',
+])
 
 const blankForm: NewRecipeForm = {
   title: '',
@@ -86,7 +91,7 @@ function normalizeVerdicts(value: unknown) {
   }))
 }
 
-function normalizeStoredRecipe(value: unknown): Recipe | null {
+function normalizeStoredRecipe(value: unknown, options: { dropInvalidStatus?: boolean } = {}): Recipe | null {
   if (!isRecord(value)) return null
 
   const title = typeof value.title === 'string' ? value.title.trim() : ''
@@ -94,7 +99,10 @@ function normalizeStoredRecipe(value: unknown): Recipe | null {
 
   const now = new Date().toISOString()
   const sourceType = sourceTypes.includes(value.sourceType as RecipeSourceType) ? (value.sourceType as RecipeSourceType) : 'manual'
-  const status = recipeStatuses.includes(value.status as RecipeStatus) ? (value.status as RecipeStatus) : 'to_try'
+  const hasValidStatus = recipeStatuses.includes(value.status as RecipeStatus)
+  if (options.dropInvalidStatus && !hasValidStatus) return null
+
+  const status = hasValidStatus ? (value.status as RecipeStatus) : 'to_try'
 
   return {
     id: typeof value.id === 'string' && value.id.trim() ? value.id : `stored-${crypto.randomUUID()}`,
@@ -121,10 +129,12 @@ function normalizeStoredRecipe(value: unknown): Recipe | null {
   }
 }
 
-function normalizeStoredRecipes(value: unknown) {
+function normalizeStoredRecipes(value: unknown, options: { dropInvalidStatus?: boolean; excludedIds?: Set<string> } = {}) {
   if (!Array.isArray(value)) return mockRecipes
 
-  const normalized = value.map(normalizeStoredRecipe).filter((recipe): recipe is Recipe => recipe !== null)
+  const normalized = value
+    .map((item) => normalizeStoredRecipe(item, { dropInvalidStatus: options.dropInvalidStatus }))
+    .filter((recipe): recipe is Recipe => recipe !== null && !options.excludedIds?.has(recipe.id))
   return normalized.length > 0 ? normalized : mockRecipes
 }
 
@@ -142,9 +152,17 @@ function safeExternalUrl(value?: string) {
 function loadStoredRecipes() {
   try {
     const stored = window.localStorage.getItem(storageKey)
-    if (!stored) return mockRecipes
+    if (stored) return normalizeStoredRecipes(JSON.parse(stored))
 
-    return normalizeStoredRecipes(JSON.parse(stored))
+    const legacyStored = window.localStorage.getItem(legacyStorageKey)
+    if (legacyStored) {
+      return normalizeStoredRecipes(JSON.parse(legacyStored), {
+        dropInvalidStatus: true,
+        excludedIds: legacyMockRecipeIds,
+      })
+    }
+
+    return mockRecipes
   } catch {
     return mockRecipes
   }
@@ -174,7 +192,6 @@ function App() {
   const [formError, setFormError] = useState('')
 
   const featuredQuest = quests[0]
-  const nextPlace = nextPlaces[0]
   const title = useMemo(() => {
     if (activeTab === 'home') return 'Home'
     if (activeTab === 'cook') return 'Cook'
@@ -185,7 +202,6 @@ function App() {
 
   const toTryCount = recipes.filter((recipe) => recipe.status === 'to_try').length
   const lovedCount = recipes.filter((recipe) => recipe.status === 'loved').length
-  const nextRecipe = recipes.find((recipe) => recipe.status === 'to_try') ?? recipes[0]
   const selectedRecipe = recipes.find((recipe) => recipe.id === selectedRecipeId) ?? null
   const selectedRecipeSafeSourceUrl = safeExternalUrl(selectedRecipe?.sourceUrl)
 
@@ -203,9 +219,10 @@ function App() {
     }
   }, [recipes])
 
-  function openCookTab() {
+  function openCookTab(showForm = false) {
     setActiveTab('cook')
     setSelectedRecipeId(null)
+    setShowSaveForm(showForm)
   }
 
   function handleAddRecipe(event: FormEvent<HTMLFormElement>) {
@@ -262,8 +279,8 @@ function App() {
                   ...recipe.verdicts,
                   {
                     cookedAt: now,
-                    rating: status === 'loved' ? 5 : status === 'archived' ? 1 : 3,
-                    notes: status === 'loved' ? 'Saved to loved recipes.' : status === 'cooked' ? 'Cooked and kept as maybe.' : 'Archived after review.',
+                    rating: 5,
+                    notes: 'Saved to loved recipes.',
                   },
                 ],
         }
@@ -271,6 +288,15 @@ function App() {
     )
     setStatusFilter(status)
     setSelectedRecipeId(null)
+  }
+
+  function deleteRecipe(recipeId: string) {
+    const confirmed = window.confirm('Delete this recipe from Foodie Me?')
+    if (!confirmed) return
+
+    setRecipes((current) => current.filter((recipe) => recipe.id !== recipeId))
+    setSelectedRecipeId(null)
+    setStatusFilter('to_try')
   }
 
   return (
@@ -289,50 +315,14 @@ function App() {
             <p className="eyebrow">Foodie Me</p>
             <h1 id="screen-title">{title}</h1>
           </div>
-          <button className="settings-button" type="button" aria-label="Settings">
-            ⚙️
-          </button>
         </header>
 
         {activeTab === 'home' && (
           <section className="tab-page" aria-label="Home dashboard">
-            <article className="hero-card">
-              <div>
-                <p className="eyebrow">Today</p>
-                <h2>Pick the next bite</h2>
-                <p>{nextPlace.name} is queued for {nextPlace.city}.</p>
-              </div>
-              <button type="button">Rate visit</button>
-            </article>
-
-            <div className="stat-row" aria-label="Foodie Me overview">
-              <article>
-                <strong>{quests.length}</strong>
-                <span>quests</span>
-              </article>
-              <article>
-                <strong>{recipes.length}</strong>
-                <span>recipes</span>
-              </article>
-              <article>
-                <strong>{lovedCount}</strong>
-                <span>loved</span>
-              </article>
-            </div>
-
-            <article className="card compact-card cook-home-card">
-              <div>
-                <p className="eyebrow">Cook next</p>
-                <h3>{nextRecipe.title}</h3>
-                <p>{sourceLabel(nextRecipe)} · {recipeMeta(nextRecipe) || 'ready to review'}</p>
-              </div>
-              <button type="button" onClick={openCookTab}>Open Cook</button>
-            </article>
-
             <article className="card compact-card">
               <div>
                 <p className="eyebrow">Active quest</p>
-                <h3>{featuredQuest.title}</h3>
+                <h2>{featuredQuest.title}</h2>
                 <p>{featuredQuest.progress}</p>
               </div>
               <span className="pill">{featuredQuest.city}</span>
@@ -394,8 +384,7 @@ function App() {
                 )}
                 <div className="verdict-row" aria-label="Recipe verdicts">
                   <button type="button" onClick={() => updateRecipeStatus(selectedRecipe.id, 'loved')}>Loved it</button>
-                  <button type="button" onClick={() => updateRecipeStatus(selectedRecipe.id, 'cooked')}>Cooked maybe</button>
-                  <button type="button" onClick={() => updateRecipeStatus(selectedRecipe.id, 'archived')}>Archive</button>
+                  <button type="button" onClick={() => deleteRecipe(selectedRecipe.id)}>Delete</button>
                 </div>
               </article>
             ) : (
@@ -535,42 +524,34 @@ function App() {
 
         {activeTab === 'quests' && (
           <section className="tab-page" aria-label="Food quests">
-            {quests.map((quest) => (
-              <article className="card" key={`${quest.city}-${quest.title}`}>
-                <p className="eyebrow">{quest.city}</p>
-                <h3>{quest.title}</h3>
-                <p>{quest.progress}</p>
-                <span className="pill">{quest.nextStep}</span>
-              </article>
-            ))}
+            <article className="card empty-state">
+              <p className="eyebrow">Quests</p>
+              <h3>No quest cards yet</h3>
+              <p>We’ll keep the active quest on Home for now while this space gets cleaned up.</p>
+            </article>
           </section>
         )}
 
         {activeTab === 'rankings' && (
           <section className="tab-page" aria-label="Rankings">
-            {rankings.map((ranking) => (
-              <article className="card" key={ranking.place}>
-                <p className="eyebrow">{ranking.dish}</p>
-                <h3>{ranking.place}</h3>
-                <div className="score-row">
-                  <span>A {ranking.anthony}</span>
-                  <span>T {ranking.tina}</span>
-                </div>
-                <p>{ranking.note}</p>
-              </article>
-            ))}
+            <article className="card empty-state">
+              <p className="eyebrow">Ranks</p>
+              <h3>Ranks are on hold</h3>
+              <p>Ranking cards will come back when we are ready to compare favorites.</p>
+            </article>
           </section>
         )}
 
         {activeTab === 'research' && (
           <section className="tab-page" aria-label="AI research">
             <article className="card research-card">
-              <p className="eyebrow">Review first</p>
-              <h3>AI ideas stay in a queue</h3>
-              <p>
-                Later this tab will show source-backed restaurant and recipe candidates. Nothing saves until you approve it.
-              </p>
-              <button type="button">Research a quest</button>
+              <p className="eyebrow">AI helper</p>
+              <h3>What should AI help with?</h3>
+              <p>Research a future quest or capture a recipe from YouTube, a link, a blog, Instagram, and more.</p>
+              <div className="action-stack">
+                <button type="button">Research a quest</button>
+                <button type="button" onClick={() => openCookTab(true)}>Save recipe</button>
+              </div>
             </article>
           </section>
         )}
