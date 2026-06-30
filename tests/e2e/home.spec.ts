@@ -279,15 +279,20 @@ test('restaurant rating persists through questRequests storage', async ({ page }
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
   await page.getByRole('button', { name: /Sonoratown/ }).click()
-  await page.getByRole('button', { name: 'Want to try' }).click()
-  await page.getByRole('button', { name: '5' }).click()
-  await page.getByLabel('Note').fill('Go after Grand Central Market.')
+  await page.getByLabel('Tina status').getByRole('button', { name: 'Want to try' }).click()
+  await page.getByLabel('Tina optional score').getByRole('button', { name: '5' }).click()
+  await page.getByLabel('Tina note').fill('Go after Grand Central Market.')
+  await page.getByLabel('Anthony status').getByRole('button', { name: 'Liked' }).click()
+  await page.getByLabel('Anthony optional score').getByRole('button', { name: '4' }).click()
+  await page.getByLabel('Anthony note').fill('Anthony wants extra salsa.')
 
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
-  await expect(page.getByRole('button', { name: /Sonoratown/ })).toContainText('Want to try · 5/5')
+  await expect(page.getByRole('button', { name: /Sonoratown/ })).toContainText('Tina: Want to try · 5/5')
+  await expect(page.getByRole('button', { name: /Sonoratown/ })).toContainText('Anthony: Liked · 4/5')
   await page.getByRole('button', { name: /Sonoratown/ }).click()
-  await expect(page.getByLabel('Note')).toHaveValue('Go after Grand Central Market.')
+  await expect(page.getByLabel('Tina note')).toHaveValue('Go after Grand Central Market.')
+  await expect(page.getByLabel('Anthony note')).toHaveValue('Anthony wants extra salsa.')
 })
 
 test('ready quests do one background refresh and keep local ratings', async ({ page }) => {
@@ -352,9 +357,9 @@ test('ready quests do one background refresh and keep local ratings', async ({ p
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
 
   await expect(page.getByText('Updated crowd/editorial-first research.')).toBeVisible()
-  await expect(page.getByRole('button', { name: /Porto’s Bakery/ })).toContainText('Want to try · 5/5')
+  await expect(page.getByRole('button', { name: /Porto’s Bakery/ })).toContainText('Tina: Want to try · 5/5')
   await page.getByRole('button', { name: /Porto’s Bakery/ }).click()
-  await expect(page.getByLabel('Note')).toHaveValue('Keep this note')
+  await expect(page.getByLabel('Tina note')).toHaveValue('Keep this note')
   await expect(page.getByRole('link', { name: 'Eater LA' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Porto’s official site' })).toHaveCount(0)
 })
@@ -400,8 +405,100 @@ test('duplicate restaurant names keep separate ratings', async ({ page }) => {
   const duplicateButtons = page.getByRole('button', { name: /Same Place/ })
   await expect(duplicateButtons).toHaveCount(2)
   await duplicateButtons.nth(0).click()
-  await page.getByRole('button', { name: 'Liked' }).click()
+  await page.getByLabel('Tina status').getByRole('button', { name: 'Liked' }).click()
 
-  await expect(duplicateButtons.nth(0)).toContainText('Liked')
+  await expect(duplicateButtons.nth(0)).toContainText('Tina: Liked')
   await expect(duplicateButtons.nth(1)).not.toContainText('Liked')
+})
+
+test('quest delete confirms, cancels, removes local card, and calls relay delete', async ({ page }) => {
+  let deleteCalls = 0
+  await page.route('https://chat.withluna.dev/foodie/quests/relay-delete-me/status?token=delete-token', async (route) => {
+    if (route.request().method() === 'DELETE') {
+      deleteCalls += 1
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ deleted: true }) })
+      return
+    }
+    await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) })
+  })
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'quest-delete',
+        relayId: 'relay-delete-me',
+        statusToken: 'delete-token',
+        city: 'Los Angeles',
+        topic: 'Dumplings',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit'],
+        createdAt: '2026-06-06T00:00:00.000Z',
+        updatedAt: '2026-06-06T00:00:00.000Z',
+        result: { summary: 'Dumpling research.', suggestions: [{ name: 'Hui Tou Xiang', neighborhood: 'San Gabriel' }] },
+      },
+    ]))
+  })
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+
+  await page.getByRole('button', { name: 'Delete' }).click()
+  await expect(page.getByText('Delete this quest?')).toBeVisible()
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.getByRole('button', { name: /Dumplings in Los Angeles/ })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Delete' }).click()
+  await page.getByRole('button', { name: 'Yes, delete quest' }).click()
+  await expect(page.getByRole('button', { name: /Dumplings in Los Angeles/ })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'No quest cards yet' })).toBeVisible()
+  await expect.poll(() => deleteCalls).toBe(1)
+
+  const storedQuestCount = await page.evaluate(() => JSON.parse(window.localStorage.getItem('foodie-me-quest-research-v2') || '[]').length)
+  expect(storedQuestCount).toBe(0)
+})
+
+test('mobile quest cards wrap long quest and suggestion text within viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'quest-mobile-long',
+        city: 'Los Angeles with an extra long neighborhood corridor name that should wrap',
+        topic: 'Extremely long crispy spicy noodle soup pop-up quest with lots of descriptive words',
+        status: 'ready',
+        statusMessage: 'Research ready with a very long status label that still wraps',
+        sources: ['Reddit'],
+        createdAt: '2026-06-07T00:00:00.000Z',
+        updatedAt: '2026-06-07T00:00:00.000Z',
+        result: {
+          summary: 'A long summary that should wrap cleanly on a narrow iPhone-sized screen without forcing horizontal scrolling.',
+          suggestions: [
+            {
+              name: 'A Very Long Restaurant Name With Multiple Words And Hyphenated Pop-Up Details',
+              neighborhood: 'A very long neighborhood and cross-street descriptor',
+              why: 'Long source-backed explanation that should stay readable and use the same comfortable text size as other quest copy.',
+              what_to_order: 'A very long order name with add-ons, substitutions, sauces, and combo notes that should wrap',
+              confidence: 'high',
+              sources: [{ label: 'An extraordinarily long source label that should wrap', url: 'https://example.com/a/really/long/source/path' }],
+            },
+          ],
+        },
+      },
+    ]))
+  })
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /A Very Long Restaurant Name/ }).click()
+
+  const questBox = await page.locator('.quest-card').first().boundingBox()
+  const suggestionBox = await page.locator('.quest-suggestion').first().boundingBox()
+  expect(questBox).not.toBeNull()
+  expect(suggestionBox).not.toBeNull()
+  expect(questBox!.x).toBeGreaterThanOrEqual(0)
+  expect(suggestionBox!.x).toBeGreaterThanOrEqual(0)
+  expect(questBox!.x + questBox!.width).toBeLessThanOrEqual(375)
+  expect(suggestionBox!.x + suggestionBox!.width).toBeLessThanOrEqual(375)
+  await expect(page.locator('.rating-owner-card')).toHaveCount(2)
 })
