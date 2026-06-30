@@ -397,7 +397,10 @@ button {
 
 .quest-results,
 .quest-suggestion-list,
-.source-link-list {
+.source-link-list,
+.quest-card-body,
+.suggestion-body,
+.rating-controls {
   display: grid;
   gap: 8px;
 }
@@ -413,6 +416,122 @@ button {
 
 .quest-suggestion strong {
   color: var(--text);
+}
+
+.quest-card-header,
+.quest-header-meta,
+.suggestion-compact-meta,
+.rating-button-row,
+.rating-score-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.quest-card-header,
+.quest-toggle,
+.suggestion-toggle {
+  justify-content: space-between;
+}
+
+.quest-toggle,
+.suggestion-toggle {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  border: 0;
+  padding: 0;
+  gap: 10px;
+  text-align: left;
+  white-space: normal;
+  background: transparent;
+}
+
+.quest-toggle > span:first-child,
+.suggestion-compact-main {
+  display: grid;
+  gap: 3px;
+}
+
+.quest-toggle strong,
+.suggestion-toggle strong,
+.rating-controls h4 {
+  color: var(--text);
+}
+
+.quest-header-meta {
+  justify-content: flex-start;
+}
+
+.expand-indicator {
+  display: inline-grid;
+  flex: 0 0 28px;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: var(--purple);
+  background: rgba(209, 196, 233, 0.48);
+  font-weight: 900;
+}
+
+.research-plan-callout,
+.research-plan-box {
+  border: 1px solid rgba(178, 223, 219, 0.42);
+  border-radius: 14px;
+  padding: 10px;
+  background: rgba(178, 223, 219, 0.16);
+}
+
+.research-plan-callout strong {
+  color: var(--text);
+}
+
+.rating-pill {
+  background: rgba(252, 228, 236, 0.72);
+}
+
+.rating-controls {
+  border: 1px solid rgba(179, 136, 255, 0.16);
+  border-radius: 14px;
+  padding: 10px;
+  background: rgba(255, 254, 250, 0.76);
+}
+
+.rating-button-row button,
+.rating-score-row button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 0.76rem;
+}
+
+.rating-button-row button.active,
+.rating-score-row button.active {
+  color: var(--purple);
+  background: rgba(209, 196, 233, 0.56);
+}
+
+.rating-controls label {
+  display: grid;
+  gap: 5px;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.rating-controls textarea {
+  width: 100%;
+  min-height: 58px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 9px 10px;
+  color: var(--text);
+  background: rgba(255, 254, 250, 0.9);
+  resize: vertical;
 }
 
 .source-link-list {

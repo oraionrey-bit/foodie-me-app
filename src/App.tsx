@@ -29,6 +29,15 @@ type QuestSourceLink = {
   url: string
 }
 
+type RestaurantRatingStatus = 'want_to_try' | 'tried_liked' | 'tried_ok' | 'skip'
+
+type QuestSuggestionRating = {
+  status?: RestaurantRatingStatus
+  score?: number
+  notes?: string
+  updatedAt?: string
+}
+
 type QuestSuggestion = {
   name: string
   neighborhood?: string
@@ -36,6 +45,7 @@ type QuestSuggestion = {
   what_to_order?: string
   confidence?: string
   sources?: QuestSourceLink[]
+  rating?: QuestSuggestionRating
 }
 
 type QuestResult = {
@@ -215,6 +225,64 @@ function normalizeQuestSourceLinks(value: unknown): QuestSourceLink[] {
     .filter((source): source is QuestSourceLink => Boolean(source.url))
 }
 
+const restaurantRatingStatuses: RestaurantRatingStatus[] = ['want_to_try', 'tried_liked', 'tried_ok', 'skip']
+
+const restaurantRatingLabels: Record<RestaurantRatingStatus, string> = {
+  want_to_try: 'Want to try',
+  tried_liked: 'Liked',
+  tried_ok: 'It was ok',
+  skip: 'Skip',
+}
+
+function normalizeSlug(value?: string) {
+  return (value || 'unknown')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'unknown'
+}
+
+function suggestionKey(questId: string, suggestion: Pick<QuestSuggestion, 'name' | 'neighborhood'>, index = 0) {
+  return `${questId}-${index}-${normalizeSlug(suggestion.name)}-${normalizeSlug(suggestion.neighborhood)}`
+}
+
+function normalizeQuestSuggestionRating(value: unknown): QuestSuggestionRating | undefined {
+  if (!isRecord(value)) return undefined
+
+  const status = restaurantRatingStatuses.includes(value.status as RestaurantRatingStatus) ? (value.status as RestaurantRatingStatus) : undefined
+  const score = typeof value.score === 'number' && Number.isInteger(value.score) && value.score >= 1 && value.score <= 5 ? value.score : undefined
+  const notes = typeof value.notes === 'string' && value.notes.trim() ? value.notes.trim() : undefined
+  const updatedAt = typeof value.updatedAt === 'string' ? value.updatedAt : undefined
+
+  return status || score || notes ? { status, score, notes, updatedAt } : undefined
+}
+
+function ratingBadgeLabel(rating?: QuestSuggestionRating) {
+  if (!rating?.status) return undefined
+  const score = rating.score ? ` · ${rating.score}/5` : ''
+  return `${restaurantRatingLabels[rating.status]}${score}`
+}
+
+function mergeQuestResultRatings(questId: string, previous?: QuestResult, next?: QuestResult) {
+  if (!next?.suggestions || !previous?.suggestions) return next
+
+  const ratingsByKey = new Map(
+    previous.suggestions
+      .map((suggestion, index) => [suggestionKey(questId, suggestion, index), suggestion.rating] as const)
+      .filter((entry): entry is readonly [string, QuestSuggestionRating] => Boolean(entry[1])),
+  )
+
+  if (ratingsByKey.size === 0) return next
+
+  return {
+    ...next,
+    suggestions: next.suggestions.map((suggestion, index) => ({
+      ...suggestion,
+      rating: suggestion.rating ?? ratingsByKey.get(suggestionKey(questId, suggestion, index)),
+    })),
+  }
+}
+
 function normalizeQuestResult(value: unknown): QuestResult | undefined {
   if (!isRecord(value)) return undefined
 
@@ -228,6 +296,7 @@ function normalizeQuestResult(value: unknown): QuestResult | undefined {
           what_to_order: typeof suggestion.what_to_order === 'string' && suggestion.what_to_order.trim() ? suggestion.what_to_order.trim() : undefined,
           confidence: typeof suggestion.confidence === 'string' && suggestion.confidence.trim() ? suggestion.confidence.trim() : undefined,
           sources: normalizeQuestSourceLinks(suggestion.sources),
+          rating: normalizeQuestSuggestionRating(suggestion.rating),
         }))
         .filter((suggestion) => suggestion.name)
     : []
@@ -412,6 +481,9 @@ function App() {
   const [newRecipe, setNewRecipe] = useState<NewRecipeForm>(blankForm)
   const [formError, setFormError] = useState('')
   const [questRequests, setQuestRequests] = useState<QuestResearch[]>(loadStoredQuestResearchRequests)
+  const [expandedQuestIds, setExpandedQuestIds] = useState<Set<string>>(() => new Set())
+  const [expandedQuestsInitialized, setExpandedQuestsInitialized] = useState(false)
+  const [expandedSuggestionIds, setExpandedSuggestionIds] = useState<Set<string>>(() => new Set())
   const [showQuestForm, setShowQuestForm] = useState(false)
   const [newQuest, setNewQuest] = useState<NewQuestForm>(blankQuestForm)
   const [questError, setQuestError] = useState('')
@@ -435,6 +507,12 @@ function App() {
     const categoryMatches = categoryFilter === 'all' || recipe.categories.includes(categoryFilter)
     return statusMatches && categoryMatches
   })
+
+  useEffect(() => {
+    if (expandedQuestsInitialized) return
+    if (questRequests[0]) setExpandedQuestIds(new Set([questRequests[0].id]))
+    setExpandedQuestsInitialized(true)
+  }, [expandedQuestsInitialized, questRequests])
 
   useEffect(() => {
     try {
@@ -467,11 +545,12 @@ function App() {
         const update = updates.find((item) => item.status === 'fulfilled' && item.value.questId === quest.id)
         if (update?.status !== 'fulfilled') return quest
         const next = update.value.status
+        const nextResult = mergeQuestResultRatings(quest.id, quest.result, next.result)
         if (
           quest.status === next.status
           && quest.statusMessage === next.statusMessage
           && quest.error === next.error
-          && quest.result === (next.result ?? quest.result)
+          && quest.result === (nextResult ?? quest.result)
           && quest.updatedAt === next.updatedAt
         ) return quest
         return {
@@ -479,7 +558,7 @@ function App() {
           status: next.status,
           statusMessage: next.statusMessage,
           error: next.error,
-          result: next.result ?? quest.result,
+          result: nextResult ?? quest.result,
           updatedAt: next.updatedAt,
         }
       }))
@@ -560,6 +639,50 @@ function App() {
     void sendQuestToOraion({ ...quest, relayId: undefined, statusToken: undefined, result: undefined })
   }
 
+  function toggleQuestExpanded(questId: string) {
+    setExpandedQuestIds((current) => {
+      const next = new Set(current)
+      if (next.has(questId)) next.delete(questId)
+      else next.add(questId)
+      return next
+    })
+  }
+
+  function toggleSuggestionExpanded(suggestionId: string) {
+    setExpandedSuggestionIds((current) => {
+      const next = new Set(current)
+      if (next.has(suggestionId)) next.delete(suggestionId)
+      else next.add(suggestionId)
+      return next
+    })
+  }
+
+  function rateSuggestion(questId: string, targetSuggestionKey: string, ratingPatch: QuestSuggestionRating) {
+    const now = new Date().toISOString()
+    setQuestRequests((current) => current.map((quest) => {
+      if (quest.id !== questId || !quest.result?.suggestions) return quest
+
+      return {
+        ...quest,
+        updatedAt: now,
+        result: {
+          ...quest.result,
+          suggestions: quest.result.suggestions.map((suggestion, index) => {
+            if (suggestionKey(quest.id, suggestion, index) !== targetSuggestionKey) return suggestion
+            return {
+              ...suggestion,
+              rating: {
+                ...suggestion.rating,
+                ...ratingPatch,
+                updatedAt: now,
+              },
+            }
+          }),
+        },
+      }
+    }))
+  }
+
   function handleAddQuest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
@@ -585,6 +708,7 @@ function App() {
     }
 
     setQuestRequests((current) => [quest, ...current])
+    setExpandedQuestIds((current) => new Set(current).add(quest.id))
     setNewQuest(blankQuestForm)
     setQuestError('')
     setShowQuestForm(false)
@@ -902,65 +1026,140 @@ function App() {
           <section className="tab-page" aria-label="Food quests">
             {questRequests.length > 0 ? (
               <div className="quest-list">
-                {questRequests.map((quest) => (
-                  <article className="card quest-card" key={quest.id}>
-                    <div className="detail-topline">
-                      <p className="eyebrow">Quest request</p>
-                      <span className={questStatusClass(quest.status)}>{questStatusLabel(quest.status, quest.statusMessage)}</span>
-                    </div>
-                    <div>
-                      <h3>{quest.topic} in {quest.city}</h3>
-                      <p>{quest.city}</p>
-                      {quest.error && <p className="form-error" role="alert">{quest.error}</p>}
-                    </div>
-                    {(quest.status === 'error' || quest.status === 'local') && (
-                      <div className="form-actions">
-                        <button type="button" onClick={() => retryQuestSend(quest)}>{quest.status === 'local' ? 'Send to Oraion' : 'Retry send'}</button>
+                {questRequests.map((quest) => {
+                  const isQuestExpanded = expandedQuestIds.has(quest.id)
+                  const suggestionCount = quest.result?.suggestions?.length ?? 0
+                  return (
+                    <article className="card quest-card" key={quest.id}>
+                      <div className="quest-card-header">
+                        <button
+                          type="button"
+                          className="quest-toggle"
+                          aria-expanded={isQuestExpanded}
+                          aria-controls={`quest-body-${quest.id}`}
+                          onClick={() => toggleQuestExpanded(quest.id)}
+                        >
+                          <span>
+                            <span className="eyebrow">Quest request</span>
+                            <strong>{quest.topic} in {quest.city}</strong>
+                            <span>{quest.city}</span>
+                          </span>
+                          <span className="expand-indicator" aria-hidden="true">{isQuestExpanded ? '−' : '+'}</span>
+                        </button>
+                        <div className="quest-header-meta">
+                          <span className={questStatusClass(quest.status)}>{questStatusLabel(quest.status, quest.statusMessage)}</span>
+                          {suggestionCount > 0 && <span className="pill">{suggestionCount} picks</span>}
+                        </div>
                       </div>
-                    )}
-                    {quest.result && (
-                      <section className="quest-results" aria-label="Quest research results">
-                        {quest.result.summary && <p>{quest.result.summary}</p>}
-                        {quest.result.suggestions && quest.result.suggestions.length > 0 && (
-                          <div className="quest-suggestion-list">
-                            {quest.result.suggestions.map((suggestion) => (
-                              <article className="quest-suggestion" key={`${quest.id}-${suggestion.name}`}>
-                                <div className="detail-topline">
-                                  <h3>{suggestion.name}</h3>
-                                  {suggestion.confidence && <span className="pill">{suggestion.confidence} confidence</span>}
+                      {isQuestExpanded && (
+                        <div id={`quest-body-${quest.id}`} className="quest-card-body">
+                          {quest.error && <p className="form-error" role="alert">{quest.error}</p>}
+                          {(quest.status === 'error' || quest.status === 'local') && (
+                            <div className="form-actions">
+                              <button type="button" onClick={() => retryQuestSend(quest)}>{quest.status === 'local' ? 'Send to Oraion' : 'Retry send'}</button>
+                            </div>
+                          )}
+                          {quest.result && (
+                            <section className="quest-results" aria-label="Quest research results">
+                              {quest.result.summary && <p>{quest.result.summary}</p>}
+                              <aside className="research-plan-callout" aria-label="Research plan">
+                                <strong>Research plan:</strong> crowd + editorial first; official pages are not proof.
+                              </aside>
+                              {quest.result.suggestions && quest.result.suggestions.length > 0 && (
+                                <div className="quest-suggestion-list">
+                                  {quest.result.suggestions.map((suggestion, index) => {
+                                    const key = suggestionKey(quest.id, suggestion, index)
+                                    const isSuggestionExpanded = expandedSuggestionIds.has(key)
+                                    const ratingLabel = ratingBadgeLabel(suggestion.rating)
+                                    return (
+                                      <article className="quest-suggestion" key={key}>
+                                        <button
+                                          type="button"
+                                          className="suggestion-toggle"
+                                          aria-expanded={isSuggestionExpanded}
+                                          aria-controls={`${key}-body`}
+                                          onClick={() => toggleSuggestionExpanded(key)}
+                                        >
+                                          <span className="suggestion-compact-main">
+                                            <strong>{suggestion.name}</strong>
+                                            {suggestion.neighborhood && <span>{suggestion.neighborhood}</span>}
+                                            {suggestion.what_to_order && <span><b>Order:</b> {suggestion.what_to_order}</span>}
+                                          </span>
+                                          <span className="suggestion-compact-meta">
+                                            {suggestion.confidence && <span className="pill">{suggestion.confidence} confidence</span>}
+                                            {ratingLabel && <span className="pill rating-pill">{ratingLabel}</span>}
+                                            <span className="expand-indicator" aria-hidden="true">{isSuggestionExpanded ? '−' : '+'}</span>
+                                          </span>
+                                        </button>
+                                        {isSuggestionExpanded && (
+                                          <div id={`${key}-body`} className="suggestion-body">
+                                            {suggestion.why && <p>{suggestion.why}</p>}
+                                            {suggestion.what_to_order && <p><strong>Order:</strong> {suggestion.what_to_order}</p>}
+                                            <section className="rating-controls" aria-label={`Rate ${suggestion.name}`}>
+                                              <h4>Your take</h4>
+                                              <div className="rating-button-row">
+                                                {restaurantRatingStatuses.map((status) => (
+                                                  <button
+                                                    type="button"
+                                                    key={status}
+                                                    className={suggestion.rating?.status === status ? 'active' : ''}
+                                                    aria-pressed={suggestion.rating?.status === status}
+                                                    onClick={() => rateSuggestion(quest.id, key, { status })}
+                                                  >
+                                                    {restaurantRatingLabels[status]}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                              <div className="rating-score-row" aria-label="Optional score">
+                                                {[1, 2, 3, 4, 5].map((score) => (
+                                                  <button
+                                                    type="button"
+                                                    key={score}
+                                                    className={suggestion.rating?.score === score ? 'active' : ''}
+                                                    aria-pressed={suggestion.rating?.score === score}
+                                                    onClick={() => rateSuggestion(quest.id, key, { score })}
+                                                  >
+                                                    {score}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                              <label htmlFor={`${key}-notes`}>
+                                                Note
+                                                <textarea
+                                                  id={`${key}-notes`}
+                                                  value={suggestion.rating?.notes ?? ''}
+                                                  onChange={(event) => rateSuggestion(quest.id, key, { notes: event.target.value })}
+                                                  placeholder="Tiny memory for future Tina"
+                                                />
+                                              </label>
+                                            </section>
+                                            {suggestion.sources && suggestion.sources.length > 0 && (
+                                              <div className="source-link-list" aria-label={`${suggestion.name} sources`}>
+                                                {suggestion.sources.map((source) => (
+                                                  <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label}</a>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </article>
+                                    )
+                                  })}
                                 </div>
-                                {suggestion.neighborhood && <p className="eyebrow">{suggestion.neighborhood}</p>}
-                                {suggestion.why && <p>{suggestion.why}</p>}
-                                {suggestion.what_to_order && <p><strong>Order:</strong> {suggestion.what_to_order}</p>}
-                                {suggestion.sources && suggestion.sources.length > 0 && (
-                                  <div className="source-link-list" aria-label={`${suggestion.name} sources`}>
-                                    {suggestion.sources.map((source) => (
-                                      <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label}</a>
-                                    ))}
-                                  </div>
-                                )}
-                              </article>
-                            ))}
-                          </div>
-                        )}
-                      </section>
-                    )}
-                    {quest.notes && (
-                      <section className="quest-notes" aria-label="Quest notes">
-                        <h3>Notes</h3>
-                        <p>{quest.notes}</p>
-                      </section>
-                    )}
-                    <section className="quest-sources" aria-label="Source checklist">
-                      <h3>Source checklist</h3>
-                      <ul>
-                        {quest.sources.map((source) => (
-                          <li key={source}>{source}</li>
-                        ))}
-                      </ul>
-                    </section>
-                  </article>
-                ))}
+                              )}
+                            </section>
+                          )}
+                          {quest.notes && (
+                            <section className="quest-notes" aria-label="Quest notes">
+                              <h3>Notes</h3>
+                              <p>{quest.notes}</p>
+                            </section>
+                          )}
+                        </div>
+                      )}
+                    </article>
+                  )
+                })}
               </div>
             ) : (
               <article className="card empty-state">
@@ -1000,7 +1199,7 @@ function App() {
                 <div>
                   <p className="eyebrow">Source-backed research</p>
                   <h3>Research a quest</h3>
-                  <p>Oraion will use Reddit, Eater/Infatuation, Google/Maps reviews, Yelp, and local food sources before any restaurant results are saved.</p>
+                  <p>I’ll prioritize Reddit/local chatter + LA editorial guides, then sanity-check reviews. Official restaurant pages are menu/location context only.</p>
                 </div>
                 <label htmlFor="quest-topic-input">
                   Food topic
@@ -1029,13 +1228,9 @@ function App() {
                     placeholder="Neighborhoods, vibes, budget, dietary notes, or must-avoid spots"
                   />
                 </label>
-                <section className="quest-sources" aria-label="Default source checklist">
-                  <h3>Default source checklist</h3>
-                  <ul>
-                    {defaultQuestSources(newQuest.city).map((source) => (
-                      <li key={source}>{source}</li>
-                    ))}
-                  </ul>
+                <section className="quest-sources research-plan-box" aria-label="Research plan">
+                  <h3>Research plan</h3>
+                  <p>Reddit/local chatter + city editorial guides first, then review sanity checks. Official pages only help with menu and location context.</p>
                 </section>
                 {questError && <p className="form-error" role="alert">{questError}</p>}
                 <div className="form-actions">
