@@ -66,6 +66,7 @@ type QuestResearch = {
   result?: QuestResult
   createdAt: string
   updatedAt: string
+  syncedReadyAt?: string
   sources: string[]
 }
 
@@ -333,6 +334,7 @@ function normalizeStoredQuestResearch(value: unknown): QuestResearch | null {
     result: normalizeQuestResult(value.result),
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : now,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : now,
+    syncedReadyAt: typeof value.syncedReadyAt === 'string' ? value.syncedReadyAt : undefined,
     sources: normalizeQuestSources(value.sources, city),
   }
 }
@@ -403,8 +405,10 @@ function isPollableQuest(quest: QuestResearch) {
   return Boolean(
     quest.relayId
     && quest.statusToken
-    && ['submitting', 'queued', 'researching', 'error'].includes(quest.status)
-    && !quest.result,
+    && (
+      (['submitting', 'queued', 'researching', 'error'].includes(quest.status) && !quest.result)
+      || (quest.status === 'ready' && quest.syncedReadyAt !== quest.updatedAt)
+    ),
   )
 }
 
@@ -546,12 +550,14 @@ function App() {
         if (update?.status !== 'fulfilled') return quest
         const next = update.value.status
         const nextResult = mergeQuestResultRatings(quest.id, quest.result, next.result)
+        const nextSyncedReadyAt = next.status === 'ready' ? next.updatedAt : quest.syncedReadyAt
         if (
           quest.status === next.status
           && quest.statusMessage === next.statusMessage
           && quest.error === next.error
           && quest.result === (nextResult ?? quest.result)
           && quest.updatedAt === next.updatedAt
+          && quest.syncedReadyAt === nextSyncedReadyAt
         ) return quest
         return {
           ...quest,
@@ -560,6 +566,7 @@ function App() {
           error: next.error,
           result: nextResult ?? quest.result,
           updatedAt: next.updatedAt,
+          syncedReadyAt: nextSyncedReadyAt,
         }
       }))
     }
