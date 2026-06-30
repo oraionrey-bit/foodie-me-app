@@ -16,6 +16,12 @@
   --tab-active: #5f2fd6;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 .phone-shell {
   position: relative;
   width: min(100%, 430px);
@@ -173,6 +179,70 @@ button {
   white-space: nowrap;
 }
 
+.quest-toggle,
+.suggestion-toggle,
+.rating-button-row button,
+.rating-score-row button,
+.source-link-list a,
+.form-actions button,
+.home-page button {
+  white-space: normal;
+}
+
+.home-page,
+.home-page .card,
+.quest-card,
+.quest-suggestion,
+.rating-owner-card {
+  max-width: 100%;
+}
+
+.home-card-heading {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.home-active-quest-card {
+  background: rgba(178, 223, 219, 0.22);
+}
+
+.foodie-today-card {
+  background: rgba(255, 248, 225, 0.9);
+}
+
+.quick-actions-card {
+  background: rgba(252, 228, 236, 0.46);
+}
+
+.home-quest-stats,
+.home-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.home-quest-stats span,
+.home-stat-grid span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid rgba(179, 136, 255, 0.14);
+  border-radius: 14px;
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.58);
+  font-size: 0.76rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.home-quest-stats strong,
+.home-stat-grid strong {
+  color: var(--text);
+  font-size: 1.28rem;
+  line-height: 1;
+}
+
 .stat-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -216,9 +286,12 @@ button {
 .score-pill,
 .score-row span {
   width: fit-content;
+  max-width: 100%;
   border-radius: 999px;
   font-size: 0.76rem;
   font-weight: 900;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .pill {
@@ -368,6 +441,7 @@ button {
 .status-badge {
   display: inline-flex;
   width: fit-content;
+  max-width: 100%;
   align-items: center;
   border-radius: 999px;
   padding: 7px 10px;
@@ -375,6 +449,8 @@ button {
   font-weight: 900;
   color: var(--text);
   background: rgba(255, 248, 225, 0.95);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .status-submitting,
@@ -464,6 +540,11 @@ button {
   background: transparent;
 }
 
+.suggestion-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .quest-toggle > span:first-child,
 .suggestion-compact-main {
   display: grid;
@@ -526,6 +607,38 @@ button {
   background: rgba(255, 255, 255, 0.64);
 }
 
+.rating-owner-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rating-owner-heading span {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--purple);
+  background: rgba(209, 196, 233, 0.38);
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.rating-button-row,
+.rating-score-row {
+  display: grid;
+  width: 100%;
+}
+
+.rating-button-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rating-score-row {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .rating-button-row button,
 .rating-score-row button {
   min-height: 32px;
@@ -561,7 +674,7 @@ button {
 }
 
 .source-link-list {
-  grid-template-columns: repeat(auto-fit, minmax(96px, max-content));
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   min-width: 0;
 }
 
@@ -689,10 +802,11 @@ button {
 
 .tab-bar {
   position: fixed;
-  right: max(14px, calc((100vw - 430px) / 2 + 14px));
   bottom: 0;
-  left: max(14px, calc((100vw - 430px) / 2 + 14px));
+  left: 50dvw;
   z-index: 10;
+  width: min(402px, calc(100dvw - 28px));
+  transform: translateX(-50%);
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 2px;

@@ -285,9 +285,14 @@ function normalizeQuestSuggestionRatings(value: unknown, legacyRating?: QuestSug
 }
 
 function ratingBadgeLabel(owner: RatingOwner, rating?: QuestSuggestionRating) {
-  if (!rating?.status) return undefined
-  const score = rating.score ? ` · ${rating.score}/5` : ''
-  return `${ratingOwnerLabels[owner]}: ${restaurantRatingLabels[rating.status]}${score}`
+  if (!rating) return undefined
+  if (rating.status) {
+    const score = rating.score ? ` · ${rating.score}/5` : ''
+    return `${ratingOwnerLabels[owner]}: ${restaurantRatingLabels[rating.status]}${score}`
+  }
+  if (rating.score) return `${ratingOwnerLabels[owner]}: ${rating.score}/5`
+  if (rating.notes) return `${ratingOwnerLabels[owner]}: note saved`
+  return undefined
 }
 
 function ratingBadgeLabels(ratings?: Partial<Record<RatingOwner, QuestSuggestionRating>>) {
@@ -536,6 +541,19 @@ function App() {
   const [newQuest, setNewQuest] = useState<NewQuestForm>(blankQuestForm)
   const [questError, setQuestError] = useState('')
   const [confirmingDeleteQuestId, setConfirmingDeleteQuestId] = useState<string | null>(null)
+  const [ratingSaveState, setRatingSaveState] = useState<Record<string, 'saving' | 'saved'>>({})
+
+  function persistQuestRequests(nextOrUpdater: QuestResearch[] | ((current: QuestResearch[]) => QuestResearch[])) {
+    setQuestRequests((current) => {
+      const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(current) : nextOrUpdater
+      try {
+        window.localStorage.setItem(questResearchStorageKey, JSON.stringify(next))
+      } catch {
+        // Keep the static app usable even if quest storage is unavailable.
+      }
+      return next
+    })
+  }
 
   const title = useMemo(() => {
     if (activeTab === 'home') return 'Home'
@@ -550,6 +568,16 @@ function App() {
   const selectedRecipe = recipes.find((recipe) => recipe.id === selectedRecipeId) ?? null
   const selectedRecipeSafeSourceUrl = safeExternalUrl(selectedRecipe?.sourceUrl)
   const activeQuestRequest = questRequests[0] ?? null
+  const activeQuestCount = questRequests.length
+  const activeQuestPickCount = activeQuestRequest?.result?.suggestions?.length ?? 0
+  const ratedPicksCount = questRequests.reduce((count, quest) => count + (quest.result?.suggestions?.filter((suggestion) => ratingBadgeLabels(suggestion.ratings).length > 0).length ?? 0), 0)
+  const ratingNotesCount = questRequests.reduce((count, quest) => count + (quest.result?.suggestions?.reduce((suggestionCount, suggestion) => (
+    suggestionCount + ratingOwners.filter((owner) => Boolean(suggestion.ratings?.[owner]?.notes)).length
+  ), 0) ?? 0), 0)
+  const latestRatingUpdatedAt = questRequests
+    .flatMap((quest) => quest.result?.suggestions?.flatMap((suggestion) => ratingOwners.map((owner) => suggestion.ratings?.[owner]?.updatedAt).filter((date): date is string => Boolean(date))) ?? [])
+    .sort()
+    .at(-1)
 
   const visibleRecipes = recipes.filter((recipe) => {
     const statusMatches = recipe.status === statusFilter
@@ -590,7 +618,7 @@ function App() {
       )
       if (cancelled) return
 
-      setQuestRequests((current) => current.map((quest) => {
+      persistQuestRequests((current) => current.map((quest) => {
         const update = updates.find((item) => item.status === 'fulfilled' && item.value.questId === quest.id)
         if (update?.status !== 'fulfilled') return quest
         const next = update.value.status
@@ -641,7 +669,7 @@ function App() {
   }
 
   async function sendQuestToOraion(quest: QuestResearch) {
-    setQuestRequests((current) => current.map((item) => (
+    persistQuestRequests((current) => current.map((item) => (
       item.id === quest.id
         ? {
             ...item,
@@ -659,7 +687,7 @@ function App() {
     try {
       const relay = await submitQuestToRelay(quest)
       if (!relay.relayId || !relay.statusToken) throw new Error('Relay response was missing quest tracking details')
-      setQuestRequests((current) => current.map((item) => (
+      persistQuestRequests((current) => current.map((item) => (
         item.id === quest.id
           ? {
               ...item,
@@ -673,7 +701,7 @@ function App() {
           : item
       )))
     } catch (error) {
-      setQuestRequests((current) => current.map((item) => (
+      persistQuestRequests((current) => current.map((item) => (
         item.id === quest.id
           ? {
               ...item,
@@ -711,7 +739,9 @@ function App() {
 
   function rateSuggestion(questId: string, targetSuggestionKey: string, owner: RatingOwner, ratingPatch: QuestSuggestionRating) {
     const now = new Date().toISOString()
-    setQuestRequests((current) => current.map((quest) => {
+    const saveKey = `${targetSuggestionKey}-${owner}`
+    setRatingSaveState((current) => ({ ...current, [saveKey]: 'saving' }))
+    persistQuestRequests((current) => current.map((quest) => {
       if (quest.id !== questId || !quest.result?.suggestions) return quest
 
       return {
@@ -737,6 +767,9 @@ function App() {
         },
       }
     }))
+    window.setTimeout(() => {
+      setRatingSaveState((current) => ({ ...current, [saveKey]: 'saved' }))
+    }, 120)
   }
 
   function requestDeleteQuest(questId: string) {
@@ -749,7 +782,7 @@ function App() {
   }
 
   function confirmDeleteQuest(quest: QuestResearch) {
-    setQuestRequests((current) => current.filter((item) => item.id !== quest.id))
+    persistQuestRequests((current) => current.filter((item) => item.id !== quest.id))
     setExpandedQuestIds((current) => {
       const next = new Set(current)
       next.delete(quest.id)
@@ -790,7 +823,7 @@ function App() {
       sources: defaultQuestSources(city),
     }
 
-    setQuestRequests((current) => [quest, ...current])
+    persistQuestRequests((current) => [quest, ...current])
     setExpandedQuestIds((current) => new Set(current).add(quest.id))
     setNewQuest(blankQuestForm)
     setQuestError('')
@@ -892,15 +925,23 @@ function App() {
         </header>
 
         {activeTab === 'home' && (
-          <section className="tab-page" aria-label="Home dashboard">
+          <section className="tab-page home-page" aria-label="Home dashboard">
             {activeQuestRequest ? (
-              <article className="card compact-card">
-                <div>
+              <article className="card home-active-quest-card">
+                <div className="home-card-heading">
                   <p className="eyebrow">Active quest</p>
                   <h2>{activeQuestRequest.topic} in {activeQuestRequest.city}</h2>
                   <span className={questStatusClass(activeQuestRequest.status)}>{questStatusLabel(activeQuestRequest.status, activeQuestRequest.statusMessage)}</span>
                 </div>
-                <span className="pill">{activeQuestRequest.city}</span>
+                <div className="home-quest-stats" aria-label="Active quest details">
+                  <span><strong>{activeQuestPickCount}</strong> picks</span>
+                  <span><strong>{ratingNotesCount}</strong> saved notes</span>
+                  <span><strong>{latestRatingUpdatedAt ? 'New' : 'No'}</strong> latest rating</span>
+                </div>
+                <div className="form-actions">
+                  <button type="button" onClick={() => setActiveTab('quests')}>Open quest</button>
+                  <button type="button" onClick={() => openResearchTab(true)}>New quest</button>
+                </div>
               </article>
             ) : (
               <article className="card empty-state">
@@ -910,6 +951,30 @@ function App() {
                 <button type="button" onClick={() => openResearchTab(true)}>Research a quest</button>
               </article>
             )}
+
+            <article className="card foodie-today-card" aria-label="Foodie today">
+              <div className="home-card-heading">
+                <p className="eyebrow">Foodie today</p>
+                <h2>Your saved food map</h2>
+              </div>
+              <div className="home-stat-grid">
+                <span><strong>{activeQuestCount}</strong> active quests</span>
+                <span><strong>{ratedPicksCount}</strong> rated picks</span>
+                <span><strong>{toTryCount}</strong> recipes to try</span>
+              </div>
+            </article>
+
+            <article className="card quick-actions-card" aria-label="Quick actions">
+              <div className="home-card-heading">
+                <p className="eyebrow">Quick actions</p>
+                <h2>What are we saving next?</h2>
+              </div>
+              <div className="action-stack">
+                <button type="button" onClick={() => openResearchTab(true)}>Research a quest</button>
+                <button type="button" onClick={() => openCookTab(true)}>Save recipe</button>
+                <button type="button" onClick={() => openCookTab(false)}>Open Cook</button>
+              </div>
+            </article>
           </section>
         )}
 
@@ -1195,9 +1260,13 @@ function App() {
                                               {ratingOwners.map((owner) => {
                                                 const ownerRating = suggestion.ratings?.[owner]
                                                 const ownerLabel = ratingOwnerLabels[owner]
+                                                const saveState = ratingSaveState[`${key}-${owner}`]
                                                 return (
                                                   <div className="rating-owner-card" key={owner}>
-                                                    <h4>{ownerLabel}'s take</h4>
+                                                    <div className="rating-owner-heading">
+                                                      <h4>{ownerLabel}'s take</h4>
+                                                      <span aria-live="polite">{saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'Saved' : 'Saved on this device'}</span>
+                                                    </div>
                                                     <div className="rating-button-row" aria-label={`${ownerLabel} status`}>
                                                       {restaurantRatingStatuses.map((status) => (
                                                         <button
