@@ -355,6 +355,41 @@ button {
   font-weight: 900;
 }
 
+.quest-results,
+.quest-suggestion-list,
+.source-link-list {
+  display: grid;
+  gap: 8px;
+}
+
+.quest-suggestion {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgba(178, 223, 219, 0.42);
+  border-radius: 14px;
+  padding: 10px;
+  background: rgba(178, 223, 219, 0.16);
+}
+
+.quest-suggestion strong {
+  color: var(--text);
+}
+
+.source-link-list {
+  grid-template-columns: repeat(auto-fit, minmax(96px, max-content));
+}
+
+.source-link-list a {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: var(--purple);
+  background: rgba(209, 196, 233, 0.42);
+  font-size: 0.76rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
 .recipe-detail {
   gap: 14px;
   background: rgba(255, 255, 255, 0.98);
