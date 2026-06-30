@@ -290,6 +290,75 @@ test('restaurant rating persists through questRequests storage', async ({ page }
   await expect(page.getByLabel('Note')).toHaveValue('Go after Grand Central Market.')
 })
 
+test('ready quests do one background refresh and keep local ratings', async ({ page }) => {
+  await page.route('https://chat.withluna.dev/foodie/quests/foodie-ready-refresh/status?token=ready-token', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'foodie-ready-refresh',
+        status: 'ready',
+        status_message: 'Research ready',
+        updated_at: '2026-06-05T00:00:03.000Z',
+        result: {
+          summary: 'Updated crowd/editorial-first research.',
+          suggestions: [
+            {
+              name: 'Porto’s Bakery & Cafe',
+              neighborhood: 'Glendale',
+              why: 'Updated independent-source summary.',
+              what_to_order: 'Cheese roll',
+              confidence: 'high',
+              sources: [{ label: 'Eater LA', url: 'https://la.eater.com/example' }],
+            },
+          ],
+        },
+      }),
+    })
+  })
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'local-ready-refresh',
+        relayId: 'foodie-ready-refresh',
+        statusToken: 'ready-token',
+        city: 'Los Angeles',
+        topic: 'Pastries',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit', 'Eater LA'],
+        createdAt: '2026-06-05T00:00:00.000Z',
+        updatedAt: '2026-06-05T00:00:01.000Z',
+        result: {
+          summary: 'Old result with official source.',
+          suggestions: [
+            {
+              name: 'Porto’s Bakery & Cafe',
+              neighborhood: 'Glendale',
+              why: 'Old source summary.',
+              what_to_order: 'Cheese roll',
+              confidence: 'high',
+              sources: [{ label: 'Porto’s official site', url: 'https://www.portosbakery.com/' }],
+              rating: { status: 'want_to_try', score: 5, notes: 'Keep this note' },
+            },
+          ],
+        },
+      },
+    ]))
+  })
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+
+  await expect(page.getByText('Updated crowd/editorial-first research.')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Porto’s Bakery/ })).toContainText('Want to try · 5/5')
+  await page.getByRole('button', { name: /Porto’s Bakery/ }).click()
+  await expect(page.getByLabel('Note')).toHaveValue('Keep this note')
+  await expect(page.getByRole('link', { name: 'Eater LA' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Porto’s official site' })).toHaveCount(0)
+})
+
 test('duplicate restaurant names keep separate ratings', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await page.evaluate(() => {
