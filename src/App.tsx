@@ -31,6 +31,8 @@ type QuestSourceLink = {
 
 type RestaurantRatingStatus = 'want_to_try' | 'tried_liked' | 'tried_ok' | 'skip'
 
+type RatingOwner = 'tina' | 'anthony'
+
 type QuestSuggestionRating = {
   status?: RestaurantRatingStatus
   score?: number
@@ -45,6 +47,8 @@ type QuestSuggestion = {
   what_to_order?: string
   confidence?: string
   sources?: QuestSourceLink[]
+  ratings?: Partial<Record<RatingOwner, QuestSuggestionRating>>
+  /** @deprecated Legacy single-user rating. Normalized into ratings.tina. */
   rating?: QuestSuggestionRating
 }
 
@@ -235,6 +239,13 @@ const restaurantRatingLabels: Record<RestaurantRatingStatus, string> = {
   skip: 'Skip',
 }
 
+const ratingOwners: RatingOwner[] = ['tina', 'anthony']
+
+const ratingOwnerLabels: Record<RatingOwner, string> = {
+  tina: 'Tina',
+  anthony: 'Anthony',
+}
+
 function normalizeSlug(value?: string) {
   return (value || 'unknown')
     .trim()
@@ -258,10 +269,31 @@ function normalizeQuestSuggestionRating(value: unknown): QuestSuggestionRating |
   return status || score || notes ? { status, score, notes, updatedAt } : undefined
 }
 
-function ratingBadgeLabel(rating?: QuestSuggestionRating) {
+function normalizeQuestSuggestionRatings(value: unknown, legacyRating?: QuestSuggestionRating): Partial<Record<RatingOwner, QuestSuggestionRating>> | undefined {
+  const ratings: Partial<Record<RatingOwner, QuestSuggestionRating>> = {}
+
+  if (isRecord(value)) {
+    ratingOwners.forEach((owner) => {
+      const rating = normalizeQuestSuggestionRating(value[owner])
+      if (rating) ratings[owner] = rating
+    })
+  }
+
+  if (!ratings.tina && legacyRating) ratings.tina = legacyRating
+
+  return Object.keys(ratings).length > 0 ? ratings : undefined
+}
+
+function ratingBadgeLabel(owner: RatingOwner, rating?: QuestSuggestionRating) {
   if (!rating?.status) return undefined
   const score = rating.score ? ` · ${rating.score}/5` : ''
-  return `${restaurantRatingLabels[rating.status]}${score}`
+  return `${ratingOwnerLabels[owner]}: ${restaurantRatingLabels[rating.status]}${score}`
+}
+
+function ratingBadgeLabels(ratings?: Partial<Record<RatingOwner, QuestSuggestionRating>>) {
+  return ratingOwners
+    .map((owner) => ratingBadgeLabel(owner, ratings?.[owner]))
+    .filter((label): label is string => Boolean(label))
 }
 
 function mergeQuestResultRatings(questId: string, previous?: QuestResult, next?: QuestResult) {
@@ -269,8 +301,8 @@ function mergeQuestResultRatings(questId: string, previous?: QuestResult, next?:
 
   const ratingsByKey = new Map(
     previous.suggestions
-      .map((suggestion, index) => [suggestionKey(questId, suggestion, index), suggestion.rating] as const)
-      .filter((entry): entry is readonly [string, QuestSuggestionRating] => Boolean(entry[1])),
+      .map((suggestion, index) => [suggestionKey(questId, suggestion, index), suggestion.ratings] as const)
+      .filter((entry): entry is readonly [string, Partial<Record<RatingOwner, QuestSuggestionRating>>] => Boolean(entry[1])),
   )
 
   if (ratingsByKey.size === 0) return next
@@ -279,7 +311,7 @@ function mergeQuestResultRatings(questId: string, previous?: QuestResult, next?:
     ...next,
     suggestions: next.suggestions.map((suggestion, index) => ({
       ...suggestion,
-      rating: suggestion.rating ?? ratingsByKey.get(suggestionKey(questId, suggestion, index)),
+      ratings: suggestion.ratings ?? ratingsByKey.get(suggestionKey(questId, suggestion, index)),
     })),
   }
 }
@@ -290,15 +322,19 @@ function normalizeQuestResult(value: unknown): QuestResult | undefined {
   const suggestions = Array.isArray(value.suggestions)
     ? value.suggestions
         .filter(isRecord)
-        .map((suggestion) => ({
-          name: typeof suggestion.name === 'string' ? suggestion.name.trim() : '',
-          neighborhood: typeof suggestion.neighborhood === 'string' && suggestion.neighborhood.trim() ? suggestion.neighborhood.trim() : undefined,
-          why: typeof suggestion.why === 'string' && suggestion.why.trim() ? suggestion.why.trim() : undefined,
-          what_to_order: typeof suggestion.what_to_order === 'string' && suggestion.what_to_order.trim() ? suggestion.what_to_order.trim() : undefined,
-          confidence: typeof suggestion.confidence === 'string' && suggestion.confidence.trim() ? suggestion.confidence.trim() : undefined,
-          sources: normalizeQuestSourceLinks(suggestion.sources),
-          rating: normalizeQuestSuggestionRating(suggestion.rating),
-        }))
+        .map((suggestion) => {
+          const legacyRating = normalizeQuestSuggestionRating(suggestion.rating)
+          const ratings = normalizeQuestSuggestionRatings(suggestion.ratings, legacyRating)
+          return {
+            name: typeof suggestion.name === 'string' ? suggestion.name.trim() : '',
+            neighborhood: typeof suggestion.neighborhood === 'string' && suggestion.neighborhood.trim() ? suggestion.neighborhood.trim() : undefined,
+            why: typeof suggestion.why === 'string' && suggestion.why.trim() ? suggestion.why.trim() : undefined,
+            what_to_order: typeof suggestion.what_to_order === 'string' && suggestion.what_to_order.trim() ? suggestion.what_to_order.trim() : undefined,
+            confidence: typeof suggestion.confidence === 'string' && suggestion.confidence.trim() ? suggestion.confidence.trim() : undefined,
+            sources: normalizeQuestSourceLinks(suggestion.sources),
+            ratings,
+          }
+        })
         .filter((suggestion) => suggestion.name)
     : []
 
@@ -475,6 +511,14 @@ async function fetchQuestStatus(quest: QuestResearch) {
   }
 }
 
+async function deleteRelayQuest(quest: QuestResearch) {
+  if (!quest.relayId || !quest.statusToken) return
+
+  await fetch(`${foodieRelayBaseUrl}/foodie/quests/${encodeURIComponent(quest.relayId)}/status?token=${encodeURIComponent(quest.statusToken)}`, {
+    method: 'DELETE',
+  })
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState<TabId>('home')
   const [recipes, setRecipes] = useState<Recipe[]>(loadStoredRecipes)
@@ -491,6 +535,7 @@ function App() {
   const [showQuestForm, setShowQuestForm] = useState(false)
   const [newQuest, setNewQuest] = useState<NewQuestForm>(blankQuestForm)
   const [questError, setQuestError] = useState('')
+  const [confirmingDeleteQuestId, setConfirmingDeleteQuestId] = useState<string | null>(null)
 
   const title = useMemo(() => {
     if (activeTab === 'home') return 'Home'
@@ -664,7 +709,7 @@ function App() {
     })
   }
 
-  function rateSuggestion(questId: string, targetSuggestionKey: string, ratingPatch: QuestSuggestionRating) {
+  function rateSuggestion(questId: string, targetSuggestionKey: string, owner: RatingOwner, ratingPatch: QuestSuggestionRating) {
     const now = new Date().toISOString()
     setQuestRequests((current) => current.map((quest) => {
       if (quest.id !== questId || !quest.result?.suggestions) return quest
@@ -678,16 +723,47 @@ function App() {
             if (suggestionKey(quest.id, suggestion, index) !== targetSuggestionKey) return suggestion
             return {
               ...suggestion,
-              rating: {
-                ...suggestion.rating,
-                ...ratingPatch,
-                updatedAt: now,
+              ratings: {
+                ...suggestion.ratings,
+                [owner]: {
+                  ...suggestion.ratings?.[owner],
+                  ...ratingPatch,
+                  updatedAt: now,
+                },
               },
+              rating: undefined,
             }
           }),
         },
       }
     }))
+  }
+
+  function requestDeleteQuest(questId: string) {
+    setExpandedQuestIds((current) => new Set(current).add(questId))
+    setConfirmingDeleteQuestId(questId)
+  }
+
+  function cancelDeleteQuest() {
+    setConfirmingDeleteQuestId(null)
+  }
+
+  function confirmDeleteQuest(quest: QuestResearch) {
+    setQuestRequests((current) => current.filter((item) => item.id !== quest.id))
+    setExpandedQuestIds((current) => {
+      const next = new Set(current)
+      next.delete(quest.id)
+      return next
+    })
+    setExpandedSuggestionIds((current) => {
+      const next = new Set<string>()
+      current.forEach((suggestionId) => {
+        if (!suggestionId.startsWith(`${quest.id}-`)) next.add(suggestionId)
+      })
+      return next
+    })
+    setConfirmingDeleteQuestId(null)
+    void deleteRelayQuest(quest).catch(() => {})
   }
 
   function handleAddQuest(event: FormEvent<HTMLFormElement>) {
@@ -1056,10 +1132,23 @@ function App() {
                         <div className="quest-header-meta">
                           <span className={questStatusClass(quest.status)}>{questStatusLabel(quest.status, quest.statusMessage)}</span>
                           {suggestionCount > 0 && <span className="pill">{suggestionCount} picks</span>}
+                          <button type="button" className="danger-text-button" onClick={() => requestDeleteQuest(quest.id)}>Delete</button>
                         </div>
                       </div>
                       {isQuestExpanded && (
                         <div id={`quest-body-${quest.id}`} className="quest-card-body">
+                          {confirmingDeleteQuestId === quest.id && (
+                            <section className="delete-confirmation" aria-label={`Confirm deleting ${quest.topic} quest`}>
+                              <div>
+                                <h3>Delete this quest?</h3>
+                                <p>This removes the quest from this phone now. If it has a relay job, Foodie Me will also try to clean that up in the background.</p>
+                              </div>
+                              <div className="form-actions">
+                                <button type="button" className="danger-button" onClick={() => confirmDeleteQuest(quest)}>Yes, delete quest</button>
+                                <button type="button" onClick={cancelDeleteQuest}>Cancel</button>
+                              </div>
+                            </section>
+                          )}
                           {quest.error && <p className="form-error" role="alert">{quest.error}</p>}
                           {(quest.status === 'error' || quest.status === 'local') && (
                             <div className="form-actions">
@@ -1077,7 +1166,7 @@ function App() {
                                   {quest.result.suggestions.map((suggestion, index) => {
                                     const key = suggestionKey(quest.id, suggestion, index)
                                     const isSuggestionExpanded = expandedSuggestionIds.has(key)
-                                    const ratingLabel = ratingBadgeLabel(suggestion.rating)
+                                    const ratingLabels = ratingBadgeLabels(suggestion.ratings)
                                     return (
                                       <article className="quest-suggestion" key={key}>
                                         <button
@@ -1094,7 +1183,7 @@ function App() {
                                           </span>
                                           <span className="suggestion-compact-meta">
                                             {suggestion.confidence && <span className="pill">{suggestion.confidence} confidence</span>}
-                                            {ratingLabel && <span className="pill rating-pill">{ratingLabel}</span>}
+                                            {ratingLabels.map((label) => <span className="pill rating-pill" key={label}>{label}</span>)}
                                             <span className="expand-indicator" aria-hidden="true">{isSuggestionExpanded ? '−' : '+'}</span>
                                           </span>
                                         </button>
@@ -1103,42 +1192,50 @@ function App() {
                                             {suggestion.why && <p>{suggestion.why}</p>}
                                             {suggestion.what_to_order && <p><strong>Order:</strong> {suggestion.what_to_order}</p>}
                                             <section className="rating-controls" aria-label={`Rate ${suggestion.name}`}>
-                                              <h4>Your take</h4>
-                                              <div className="rating-button-row">
-                                                {restaurantRatingStatuses.map((status) => (
-                                                  <button
-                                                    type="button"
-                                                    key={status}
-                                                    className={suggestion.rating?.status === status ? 'active' : ''}
-                                                    aria-pressed={suggestion.rating?.status === status}
-                                                    onClick={() => rateSuggestion(quest.id, key, { status })}
-                                                  >
-                                                    {restaurantRatingLabels[status]}
-                                                  </button>
-                                                ))}
-                                              </div>
-                                              <div className="rating-score-row" aria-label="Optional score">
-                                                {[1, 2, 3, 4, 5].map((score) => (
-                                                  <button
-                                                    type="button"
-                                                    key={score}
-                                                    className={suggestion.rating?.score === score ? 'active' : ''}
-                                                    aria-pressed={suggestion.rating?.score === score}
-                                                    onClick={() => rateSuggestion(quest.id, key, { score })}
-                                                  >
-                                                    {score}
-                                                  </button>
-                                                ))}
-                                              </div>
-                                              <label htmlFor={`${key}-notes`}>
-                                                Note
-                                                <textarea
-                                                  id={`${key}-notes`}
-                                                  value={suggestion.rating?.notes ?? ''}
-                                                  onChange={(event) => rateSuggestion(quest.id, key, { notes: event.target.value })}
-                                                  placeholder="Tiny memory for future Tina"
-                                                />
-                                              </label>
+                                              {ratingOwners.map((owner) => {
+                                                const ownerRating = suggestion.ratings?.[owner]
+                                                const ownerLabel = ratingOwnerLabels[owner]
+                                                return (
+                                                  <div className="rating-owner-card" key={owner}>
+                                                    <h4>{ownerLabel}'s take</h4>
+                                                    <div className="rating-button-row" aria-label={`${ownerLabel} status`}>
+                                                      {restaurantRatingStatuses.map((status) => (
+                                                        <button
+                                                          type="button"
+                                                          key={status}
+                                                          className={ownerRating?.status === status ? 'active' : ''}
+                                                          aria-pressed={ownerRating?.status === status}
+                                                          onClick={() => rateSuggestion(quest.id, key, owner, { status })}
+                                                        >
+                                                          {restaurantRatingLabels[status]}
+                                                        </button>
+                                                      ))}
+                                                    </div>
+                                                    <div className="rating-score-row" aria-label={`${ownerLabel} optional score`}>
+                                                      {[1, 2, 3, 4, 5].map((score) => (
+                                                        <button
+                                                          type="button"
+                                                          key={score}
+                                                          className={ownerRating?.score === score ? 'active' : ''}
+                                                          aria-pressed={ownerRating?.score === score}
+                                                          onClick={() => rateSuggestion(quest.id, key, owner, { score })}
+                                                        >
+                                                          {score}
+                                                        </button>
+                                                      ))}
+                                                    </div>
+                                                    <label htmlFor={`${key}-${owner}-notes`}>
+                                                      {ownerLabel} note
+                                                      <textarea
+                                                        id={`${key}-${owner}-notes`}
+                                                        value={ownerRating?.notes ?? ''}
+                                                        onChange={(event) => rateSuggestion(quest.id, key, owner, { notes: event.target.value })}
+                                                        placeholder={`Tiny memory for future ${ownerLabel}`}
+                                                      />
+                                                    </label>
+                                                  </div>
+                                                )
+                                              })}
                                             </section>
                                             {suggestion.sources && suggestion.sources.length > 0 && (
                                               <div className="source-link-list" aria-label={`${suggestion.name} sources`}>
