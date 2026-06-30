@@ -10,6 +10,58 @@ test('home screen starts without fake active quest or settings', async ({ page }
   await expect(page.getByText('Appetite settings')).toHaveCount(0)
   await expect(page.getByText('Auto-pick')).toHaveCount(0)
   await expect(page.getByText('Active plan')).toHaveCount(0)
+  await expect(page.getByRole('article', { name: 'Foodie today' })).toBeVisible()
+  await expect(page.getByText('0 active quests')).toBeVisible()
+  await expect(page.getByText(/\d+ recipes to try/)).toBeVisible()
+  await expect(page.getByRole('article', { name: 'Quick actions' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open Cook' })).toBeVisible()
+})
+
+test('home shows richer active quest stats and quick actions', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'quest-home-rich',
+        city: 'Los Angeles',
+        topic: 'Korean noodles',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit'],
+        createdAt: '2026-06-08T00:00:00.000Z',
+        updatedAt: '2026-06-08T00:00:00.000Z',
+        result: {
+          summary: 'Home card research.',
+          suggestions: [
+            {
+              name: 'Hangari Kalguksu',
+              neighborhood: 'Koreatown',
+              ratings: { tina: { notes: 'Cozy soup note', updatedAt: '2026-06-08T00:01:00.000Z' } },
+            },
+            {
+              name: 'MDK Noodles',
+              neighborhood: 'Koreatown',
+              ratings: { anthony: { status: 'want_to_try', updatedAt: '2026-06-08T00:02:00.000Z' } },
+            },
+          ],
+        },
+      },
+    ]))
+  })
+  await page.reload()
+
+  await expect(page.getByRole('heading', { name: 'Korean noodles in Los Angeles', level: 2 })).toBeVisible()
+  await expect(page.getByText('Research ready')).toBeVisible()
+  await expect(page.getByText('2 picks')).toBeVisible()
+  await expect(page.getByText('1 saved notes')).toBeVisible()
+  await expect(page.getByText('New latest rating')).toBeVisible()
+  await expect(page.getByText('1 active quests')).toBeVisible()
+  await expect(page.getByText('2 rated picks')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open quest' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New quest' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Research a quest' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Save recipe' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open Cook' })).toBeVisible()
 })
 
 test('bottom navigation order keeps Cook last', async ({ page }) => {
@@ -295,6 +347,46 @@ test('restaurant rating persists through questRequests storage', async ({ page }
   await expect(page.getByLabel('Anthony note')).toHaveValue('Anthony wants extra salsa.')
 })
 
+test('note-only restaurant rating persists and shows a collapsed badge after reload', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'quest-note-only',
+        city: 'Los Angeles',
+        topic: 'Burgers',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit'],
+        createdAt: '2026-06-09T00:00:00.000Z',
+        updatedAt: '2026-06-09T00:00:00.000Z',
+        result: {
+          summary: 'Burger research.',
+          suggestions: [{ name: 'Amboy', neighborhood: 'Chinatown', why: 'Burger counter favorite.' }],
+        },
+      },
+    ]))
+  })
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Amboy/ }).click()
+  await expect(page.getByText('Saved on this device')).toHaveCount(2)
+  await page.getByLabel('Tina note').fill('Try the double and fries.')
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible()
+
+  const storedNote = await page.evaluate(() => {
+    const stored = JSON.parse(window.localStorage.getItem('foodie-me-quest-research-v2') || '[]')
+    return stored[0].result.suggestions[0].ratings.tina.notes
+  })
+  expect(storedNote).toBe('Try the double and fries.')
+
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await expect(page.getByRole('button', { name: /Amboy/ })).toContainText('Tina: note saved')
+  await page.getByRole('button', { name: /Amboy/ }).click()
+  await expect(page.getByLabel('Tina note')).toHaveValue('Try the double and fries.')
+})
+
 test('ready quests do one background refresh and keep local ratings', async ({ page }) => {
   await page.route('https://chat.withluna.dev/foodie/quests/foodie-ready-refresh/status?token=ready-token', async (route) => {
     await route.fulfill({
@@ -501,4 +593,6 @@ test('mobile quest cards wrap long quest and suggestion text within viewport', a
   expect(questBox!.x + questBox!.width).toBeLessThanOrEqual(375)
   expect(suggestionBox!.x + suggestionBox!.width).toBeLessThanOrEqual(375)
   await expect(page.locator('.rating-owner-card')).toHaveCount(2)
+  const viewportOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  expect(viewportOverflow).toBe(true)
 })
