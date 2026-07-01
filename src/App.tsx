@@ -94,8 +94,9 @@ const statusFilters: Array<{ id: RecipeStatus; label: string }> = [
 ]
 
 const sourceTypes: RecipeSourceType[] = ['website', 'youtube', 'tiktok', 'instagram', 'photo', 'cookbook', 'manual']
-const storageKey = 'foodie-me-recipes-v2'
-const legacyStorageKey = 'foodie-me-recipes-v1'
+const storageKey = 'foodie-me-recipes-v3'
+const legacyStorageKey = 'foodie-me-recipes-v2'
+const oldestRecipeStorageKey = 'foodie-me-recipes-v1'
 const questResearchStorageKey = 'foodie-me-quest-research-v2'
 const legacyQuestResearchStorageKey = 'foodie-me-quest-research-v1'
 const foodieRelayBaseUrl = (import.meta.env.VITE_FOODIE_RELAY_URL || 'https://chat.withluna.dev').replace(/\/$/, '')
@@ -202,13 +203,23 @@ function normalizeStoredRecipe(value: unknown, options: { dropInvalidStatus?: bo
   }
 }
 
-function normalizeStoredRecipes(value: unknown, options: { dropInvalidStatus?: boolean; excludedIds?: Set<string> } = {}) {
+function withMissingSeedRecipes(recipes: Recipe[]) {
+  const existingIds = new Set(recipes.map((recipe) => recipe.id))
+  const missingSeedRecipes = mockRecipes.filter((recipe) => !existingIds.has(recipe.id))
+  return missingSeedRecipes.length > 0 ? [...missingSeedRecipes, ...recipes] : recipes
+}
+
+function normalizeStoredRecipes(
+  value: unknown,
+  options: { dropInvalidStatus?: boolean; excludedIds?: Set<string>; includeMissingSeedRecipes?: boolean } = {},
+) {
   if (!Array.isArray(value)) return mockRecipes
 
   const normalized = value
     .map((item) => normalizeStoredRecipe(item, { dropInvalidStatus: options.dropInvalidStatus }))
     .filter((recipe): recipe is Recipe => recipe !== null && !options.excludedIds?.has(recipe.id))
-  return normalized.length > 0 ? normalized : mockRecipes
+  if (normalized.length === 0) return mockRecipes
+  return options.includeMissingSeedRecipes ? withMissingSeedRecipes(normalized) : normalized
 }
 
 function normalizeQuestSources(value: unknown, city: string) {
@@ -403,10 +414,14 @@ function loadStoredRecipes() {
     if (stored) return normalizeStoredRecipes(JSON.parse(stored))
 
     const legacyStored = window.localStorage.getItem(legacyStorageKey)
-    if (legacyStored) {
-      return normalizeStoredRecipes(JSON.parse(legacyStored), {
+    if (legacyStored) return normalizeStoredRecipes(JSON.parse(legacyStored), { includeMissingSeedRecipes: true })
+
+    const oldestStored = window.localStorage.getItem(oldestRecipeStorageKey)
+    if (oldestStored) {
+      return normalizeStoredRecipes(JSON.parse(oldestStored), {
         dropInvalidStatus: true,
         excludedIds: legacyMockRecipeIds,
+        includeMissingSeedRecipes: true,
       })
     }
 

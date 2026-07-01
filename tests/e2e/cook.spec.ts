@@ -161,7 +161,7 @@ test('bad stored recipes fall back to mock data without crashing', async ({ page
 test('unsupported source URLs are shown as text, not clickable links', async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem(
-      'foodie-me-recipes-v2',
+      'foodie-me-recipes-v3',
       JSON.stringify([
         {
           id: 'unsafe-url-recipe',
