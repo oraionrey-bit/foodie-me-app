@@ -980,8 +980,8 @@ function App() {
     <main className="phone-shell">
       <section className="image-hero" aria-label="Foodie Me header image">
         <img
-          src={`${import.meta.env.BASE_URL}images/foodie-me-header-cropped.jpeg`}
-          alt="Cute cream food truck with yellow striped awning, roof plants, and pastel food details"
+          src={`${import.meta.env.BASE_URL}images/foodie-me-header-pancake-friends.webp`}
+          alt="Cute cartoon fox and white bunny smiling beside pancakes with whipped cream and a strawberry"
           className="hero-image"
         />
       </section>
