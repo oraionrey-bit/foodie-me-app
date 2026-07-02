@@ -1,4 +1,31 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+
+async function expectNoHorizontalOverflow(page: Page) {
+  const overflowReport = await page.evaluate(() => {
+    const clientWidth = document.documentElement.clientWidth
+    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
+      .map((element) => {
+        const rect = element.getBoundingClientRect()
+        return {
+          tag: element.tagName.toLowerCase(),
+          className: element.className.toString(),
+          text: element.textContent?.trim().slice(0, 80) || '',
+          left: rect.left,
+          right: rect.right,
+          width: rect.width,
+        }
+      })
+      .filter((item) => item.width > 0 && (item.left < -0.5 || item.right > clientWidth + 0.5))
+    return {
+      clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      offenders,
+    }
+  })
+
+  expect(overflowReport.scrollWidth).toBeLessThanOrEqual(overflowReport.clientWidth)
+  expect(overflowReport.offenders).toEqual([])
+}
 
 const shizukuRecipeNames = [
   'Curry-flavored grilled mackerel bento',
@@ -156,6 +183,51 @@ test('bad stored recipes fall back to mock data without crashing', async ({ page
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Cook', exact: true }).click()
 
   await expect(page.getByRole('heading', { name: 'Curry-flavored grilled mackerel bento' })).toBeVisible()
+})
+
+test('cook recipe cards and detail stay mobile friendly with long saved text', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 812 })
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      'foodie-me-recipes-v3',
+      JSON.stringify([
+        {
+          id: 'long-mobile-recipe',
+          title: 'Very long homemade recipe title with no-room-to-cheat mobile wrapping behavior',
+          description: 'A saved recipe with extremely long text to verify mobile card wrapping.',
+          sourceType: 'website',
+          sourceUrl: 'https://example.com/recipes/SuperLongUnbrokenRecipeUrlSegmentThatShouldNeverForceHorizontalScrollingOnMobile',
+          sourceLabel: 'A very long source label that should wrap instead of stretching the card sideways',
+          status: 'to_try',
+          categories: ['weeknight'],
+          tags: ['mobile-test'],
+          yield: 'A very long yield description that should still wrap on a small phone',
+          ingredients: [
+            { id: 'i1', text: 'SuperLongUnbrokenIngredientNameThatPreviouslyWouldHaveForcedTheRecipeDetailOutsideTheViewport' },
+            { id: 'i2', text: 'Normal ingredient with a long explanatory note about substitutions and prep' },
+          ],
+          steps: [
+            { id: 's1', text: 'SuperLongUnbrokenStepInstructionThatMustWrapInsideTheCardWithoutCreatingHorizontalScroll', timerMinutes: 15 },
+            { id: 's2', text: 'Finish with a normal but long instruction that spans multiple lines comfortably.' },
+          ],
+          notes: 'SuperLongUnbrokenRecipeNoteThatShouldWrapInsideTheNotesBoxAndNotMakeThePhoneSideScroll',
+          capturedAt: '2026-07-01T00:00:00.000Z',
+          updatedAt: '2026-07-01T00:00:00.000Z',
+          verdicts: [],
+        },
+      ]),
+    )
+  })
+
+  await page.goto('/')
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Cook', exact: true }).click()
+  await expect(page.getByRole('heading', { name: /Very long homemade recipe title/ })).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+
+  await page.locator('article').filter({ has: page.getByRole('heading', { name: /Very long homemade recipe title/ }) }).getByRole('button', { name: 'Open' }).click()
+  await expect(page.getByText(/SuperLongUnbrokenIngredientName/)).toBeVisible()
+  await expect(page.getByText(/SuperLongUnbrokenStepInstruction/)).toBeVisible()
+  await expectNoHorizontalOverflow(page)
 })
 
 test('unsupported source URLs are shown as text, not clickable links', async ({ page }) => {
