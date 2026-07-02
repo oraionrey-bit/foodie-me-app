@@ -27,7 +27,7 @@
   width: min(100%, 430px);
   min-height: 100svh;
   margin: 0 auto;
-  padding: 8px 14px 98px;
+  padding: 8px 14px calc(98px + env(safe-area-inset-bottom));
 }
 
 .image-hero {
@@ -176,7 +176,7 @@ button {
 .tab-page button {
   min-height: 38px;
   padding: 0 12px;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .quest-toggle,
@@ -372,8 +372,9 @@ button {
 
 .chip-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
-  overflow-x: auto;
+  overflow-x: visible;
   padding-bottom: 2px;
 }
 
@@ -429,7 +430,7 @@ button {
 
 .form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -609,6 +610,7 @@ button {
 
 .rating-owner-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -616,7 +618,9 @@ button {
 }
 
 .rating-owner-heading span {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
   border-radius: 999px;
   padding: 4px 8px;
   color: var(--purple);
@@ -723,15 +727,17 @@ button {
 .ingredient-list li,
 .step-list li,
 .notes-box {
+  min-width: 0;
   border: 1px solid rgba(179, 136, 255, 0.14);
   border-radius: 14px;
   padding: 10px;
   background: rgba(255, 248, 225, 0.52);
+  overflow-wrap: anywhere;
 }
 
 .ingredient-list li {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -741,7 +747,7 @@ button {
 
 .step-list li {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   counter-increment: step;
 }
@@ -808,10 +814,10 @@ button {
   width: min(402px, calc(100dvw - 28px));
   transform: translateX(-50%);
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 2px;
-  height: 80px;
-  padding: 8px 7px 18px;
+  min-height: 80px;
+  padding: 8px 7px calc(18px + env(safe-area-inset-bottom));
   border: 1px solid var(--border);
   border-bottom: 0;
   border-radius: 22px 22px 0 0;
@@ -845,6 +851,146 @@ button {
 .tab-bar button.active span {
   opacity: 1;
   transform: scale(1.08);
+}
+
+/* Mobile hardening: dynamic quest results include AI/user text that can be very long.
+   Keep every nested card/text surface shrinkable and wrap body content instead of
+   letting flex/grid min-content widths create sideways scroll. */
+.phone-shell,
+.app-screen,
+.tab-page,
+.card,
+.hero-card,
+.compact-card,
+.quest-list,
+.quest-card,
+.quest-card-header,
+.quest-card-body,
+.quest-results,
+.quest-suggestion-list,
+.quest-suggestion,
+.suggestion-toggle,
+.suggestion-compact-main,
+.suggestion-compact-meta,
+.suggestion-body,
+.suggestion-field,
+.rating-controls,
+.rating-owner-card,
+.source-link-list,
+.recipe-list,
+.recipe-card,
+.recipe-detail,
+.save-recipe-form,
+.form-grid,
+.form-actions,
+.delete-confirmation,
+.research-plan-callout,
+.research-plan-box,
+.quest-notes {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.card,
+.quest-card,
+.quest-suggestion,
+.suggestion-body,
+.suggestion-field,
+.rating-controls,
+.rating-owner-card,
+.research-plan-callout,
+.research-plan-box,
+.quest-notes,
+.recipe-card,
+.recipe-detail {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.hero-card,
+.compact-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.hero-card button,
+.compact-card button,
+.recipe-queue-card button,
+.research-card button,
+.quest-status-card button {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.stat-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.quest-toggle,
+.suggestion-toggle {
+  overflow: visible;
+}
+
+.quest-toggle > span:first-child,
+.suggestion-compact-main,
+.rating-owner-heading h4 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.suggestion-compact-main > span,
+.suggestion-body p,
+.quest-results p,
+.quest-notes p {
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.suggestion-order-preview,
+.suggestion-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.suggestion-order-preview {
+  margin-top: 2px;
+  border-radius: 12px;
+  padding: 8px 9px;
+  background: rgba(255, 254, 250, 0.72);
+}
+
+.suggestion-field {
+  border: 1px solid rgba(178, 223, 219, 0.42);
+  border-radius: 14px;
+  padding: 10px;
+  background: rgba(255, 254, 250, 0.78);
+}
+
+.suggestion-field-label {
+  color: var(--purple);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.suggestion-field p {
+  color: var(--text);
+}
+
+.pill,
+.status-badge,
+.source-link,
+.source-link-list a,
+.rating-owner-heading span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 390px) {

@@ -1,4 +1,31 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+
+async function expectNoHorizontalOverflow(page: Page) {
+  const overflowReport = await page.evaluate(() => {
+    const clientWidth = document.documentElement.clientWidth
+    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
+      .map((element) => {
+        const rect = element.getBoundingClientRect()
+        return {
+          tag: element.tagName.toLowerCase(),
+          className: element.className.toString(),
+          text: element.textContent?.trim().slice(0, 80) || '',
+          left: rect.left,
+          right: rect.right,
+          width: rect.width,
+        }
+      })
+      .filter((item) => item.width > 0 && (item.left < -0.5 || item.right > clientWidth + 0.5))
+    return {
+      clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      offenders,
+    }
+  })
+
+  expect(overflowReport.scrollWidth).toBeLessThanOrEqual(overflowReport.clientWidth)
+  expect(overflowReport.offenders).toEqual([])
+}
 
 test('home screen starts without fake active quest or settings', async ({ page }) => {
   await page.goto('/')
@@ -626,7 +653,8 @@ test('quest delete confirms, cancels, removes local card, and calls relay delete
 })
 
 test('mobile quest cards wrap long quest and suggestion text within viewport', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 })
+  const viewportWidth = 320
+  await page.setViewportSize({ width: viewportWidth, height: 812 })
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await page.evaluate(() => {
     window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
@@ -646,7 +674,7 @@ test('mobile quest cards wrap long quest and suggestion text within viewport', a
               name: 'A Very Long Restaurant Name With Multiple Words And Hyphenated Pop-Up Details',
               neighborhood: 'A very long neighborhood and cross-street descriptor',
               why: 'Long source-backed explanation that should stay readable and use the same comfortable text size as other quest copy.',
-              what_to_order: 'A very long order name with add-ons, substitutions, sauces, and combo notes that should wrap',
+              what_to_order: 'A very long order name with add-ons, substitutions, sauces, and combo notes that should wrap plus SuperLongUnbrokenOrderTokenWithNoSpacesThatPreviouslyForcedSidewaysScrollingAcrossThePhoneViewport',
               confidence: 'high',
               sources: [{ label: 'An extraordinarily long source label that should wrap', url: 'https://example.com/a/really/long/source/path' }],
             },
@@ -661,13 +689,20 @@ test('mobile quest cards wrap long quest and suggestion text within viewport', a
 
   const questBox = await page.locator('.quest-card').first().boundingBox()
   const suggestionBox = await page.locator('.quest-suggestion').first().boundingBox()
+  const orderPreviewBox = await page.locator('.suggestion-order-preview').first().boundingBox()
+  const orderDetailBox = await page.locator('.suggestion-order-detail').first().boundingBox()
   expect(questBox).not.toBeNull()
   expect(suggestionBox).not.toBeNull()
+  expect(orderPreviewBox).not.toBeNull()
+  expect(orderDetailBox).not.toBeNull()
   expect(questBox!.x).toBeGreaterThanOrEqual(0)
   expect(suggestionBox!.x).toBeGreaterThanOrEqual(0)
-  expect(questBox!.x + questBox!.width).toBeLessThanOrEqual(375)
-  expect(suggestionBox!.x + suggestionBox!.width).toBeLessThanOrEqual(375)
+  expect(orderPreviewBox!.x).toBeGreaterThanOrEqual(0)
+  expect(orderDetailBox!.x).toBeGreaterThanOrEqual(0)
+  expect(questBox!.x + questBox!.width).toBeLessThanOrEqual(viewportWidth)
+  expect(suggestionBox!.x + suggestionBox!.width).toBeLessThanOrEqual(viewportWidth)
+  expect(orderPreviewBox!.x + orderPreviewBox!.width).toBeLessThanOrEqual(viewportWidth)
+  expect(orderDetailBox!.x + orderDetailBox!.width).toBeLessThanOrEqual(viewportWidth)
   await expect(page.locator('.rating-owner-card')).toHaveCount(2)
-  const viewportOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
-  expect(viewportOverflow).toBe(true)
+  await expectNoHorizontalOverflow(page)
 })

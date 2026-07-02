@@ -1260,7 +1260,6 @@ function App() {
                           <span>
                             <span className="eyebrow">Quest request</span>
                             <strong>{quest.topic} in {quest.city}</strong>
-                            <span>{quest.city}</span>
                           </span>
                           <span className="expand-indicator" aria-hidden="true">{isQuestExpanded ? '−' : '+'}</span>
                         </button>
@@ -1314,7 +1313,12 @@ function App() {
                                           <span className="suggestion-compact-main">
                                             <strong>{suggestion.name}</strong>
                                             {suggestion.neighborhood && <span>{suggestion.neighborhood}</span>}
-                                            {suggestion.what_to_order && <span><b>Order:</b> {suggestion.what_to_order}</span>}
+                                            {suggestion.what_to_order && (
+                                              <span className="suggestion-order-preview">
+                                                <span className="suggestion-field-label">Order</span>
+                                                <span>{suggestion.what_to_order}</span>
+                                              </span>
+                                            )}
                                           </span>
                                           <span className="suggestion-compact-meta">
                                             {suggestion.confidence && <span className="pill">{suggestion.confidence} confidence</span>}
@@ -1325,7 +1329,12 @@ function App() {
                                         {isSuggestionExpanded && (
                                           <div id={`${key}-body`} className="suggestion-body">
                                             {suggestion.why && <p>{suggestion.why}</p>}
-                                            {suggestion.what_to_order && <p><strong>Order:</strong> {suggestion.what_to_order}</p>}
+                                            {suggestion.what_to_order && (
+                                              <section className="suggestion-field suggestion-order-detail" aria-label={`What to order at ${suggestion.name}`}>
+                                                <span className="suggestion-field-label">Order</span>
+                                                <p>{suggestion.what_to_order}</p>
+                                              </section>
+                                            )}
                                             <section className="rating-controls" aria-label={`Rate ${suggestion.name}`}>
                                               {ratingOwners.map((owner) => {
                                                 const ownerRating = suggestion.ratings?.[owner]
