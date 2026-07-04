@@ -11,6 +11,7 @@ import {
   type RecipeSourceType,
   type RecipeStatus,
 } from './data/mockRecipes'
+import { buildRankingSections, isRecipeRankingItem } from './lib/rankings'
 
 type TabId = 'home' | 'cook' | 'quests' | 'rankings' | 'research'
 
@@ -661,6 +662,7 @@ function App() {
     }
   }, [questRequests])
   const { activeQuestCount, activeQuestPickCount, ratedPicksCount, ratingNotesCount, latestRatingUpdatedAt } = questStats
+  const rankingSections = useMemo(() => buildRankingSections(questRequests, recipes), [questRequests, recipes])
 
   const visibleRecipes = useMemo(() => recipes.filter((recipe) => {
     const statusMatches = recipe.status === statusFilter
@@ -1496,12 +1498,62 @@ function App() {
         )}
 
         {activeTab === 'rankings' && (
-          <section className="tab-page" aria-label="Rankings">
-            <article className="card empty-state">
-              <p className="eyebrow">Ranks</p>
-              <h3>Ranks are on hold</h3>
-              <p>Ranking cards will come back when we are ready to compare favorites.</p>
+          <section className="tab-page rankings-page" aria-label="Rankings">
+            <article className="hero-card rankings-hero-card">
+              <div>
+                <p className="eyebrow">Ranks</p>
+                <h2>Best saved bites</h2>
+                <p>Favorites from quest ratings and recipes you loved in Cook.</p>
+              </div>
+              <button type="button" onClick={() => setActiveTab('quests')}>Rate picks</button>
             </article>
+
+            <div className="ranking-section-list">
+              {rankingSections.map((section) => (
+                <section className="ranking-section" key={section.id} aria-labelledby={`${section.id}-title`}>
+                  <div className="ranking-section-heading">
+                    <h3 id={`${section.id}-title`}>{section.title}</h3>
+                    <span className="pill">{section.items.length}</span>
+                  </div>
+                  {section.items.length > 0 ? (
+                    <div className="ranking-list">
+                      {section.items.map((item, index) => (
+                        <article className="card ranking-card" key={item.id}>
+                          <span className="ranking-number">#{index + 1}</span>
+                          <div className="ranking-card-body">
+                            {isRecipeRankingItem(item) ? (
+                              <>
+                                <p className="eyebrow">Recipe keeper</p>
+                                <h4>{item.title}</h4>
+                                <p>{compactPreview(item.detail, 110)}</p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="eyebrow">{item.topic} · {item.city}</p>
+                                <h4>{item.name}</h4>
+                                <p>{item.neighborhood ? `${item.neighborhood} · ${item.reason}` : item.reason}</p>
+                                {item.order && <p className="ranking-order">Order: {compactPreview(item.order, 96)}</p>}
+                              </>
+                            )}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <article className="card empty-state ranking-empty-state">
+                      <h4>{section.emptyTitle}</h4>
+                      <p>{section.emptyBody}</p>
+                      <div className="form-actions">
+                        <button type="button" onClick={() => section.id === 'lovedRecipes' ? openCookTab(false) : setActiveTab('quests')}>
+                          {section.id === 'lovedRecipes' ? 'Open Cook' : 'Open quests'}
+                        </button>
+                        {section.id !== 'lovedRecipes' && <button type="button" onClick={() => openResearchTab(true)}>Research a quest</button>}
+                      </div>
+                    </article>
+                  )}
+                </section>
+              ))}
+            </div>
           </section>
         )}
 

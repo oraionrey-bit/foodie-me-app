@@ -83,6 +83,7 @@
 h1,
 h2,
 h3,
+h4,
 p {
   margin: 0;
 }
@@ -105,6 +106,12 @@ h3 {
   color: var(--text);
   font-size: 1rem;
   line-height: 1.15;
+}
+
+h4 {
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.18;
 }
 
 p,
@@ -339,7 +346,8 @@ button {
 }
 
 .research-card,
-.recipe-queue-card {
+.recipe-queue-card,
+.rankings-hero-card {
   background: rgba(255, 248, 225, 0.95);
 }
 
@@ -393,6 +401,76 @@ button {
 
 .recipe-card {
   background: rgba(255, 255, 255, 0.96);
+}
+
+.rankings-page {
+  gap: 12px;
+}
+
+.ranking-section-list,
+.ranking-section,
+.ranking-list,
+.ranking-card-body {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.ranking-section {
+  border: 1px solid rgba(179, 136, 255, 0.14);
+  border-radius: 16px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.ranking-section-heading,
+.ranking-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ranking-section-heading {
+  align-items: center;
+}
+
+.ranking-card {
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.ranking-number {
+  grid-column: 2;
+  grid-row: 1;
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  color: var(--purple);
+  background: rgba(209, 196, 233, 0.48);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.ranking-card-body {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.ranking-card-body p {
+  font-size: 0.86rem;
+}
+
+.ranking-order {
+  border-radius: 12px;
+  padding: 8px 9px;
+  background: rgba(178, 223, 219, 0.2);
+}
+
+.ranking-empty-state {
+  background: rgba(255, 248, 225, 0.76);
 }
 
 .recipe-card p:not(.eyebrow) {
@@ -881,6 +959,12 @@ button {
 .recipe-list,
 .recipe-card,
 .recipe-detail,
+.rankings-page,
+.ranking-section-list,
+.ranking-section,
+.ranking-list,
+.ranking-card,
+.ranking-card-body,
 .save-recipe-form,
 .form-grid,
 .form-actions,
@@ -903,7 +987,10 @@ button {
 .research-plan-box,
 .quest-notes,
 .recipe-card,
-.recipe-detail {
+.recipe-detail,
+.ranking-section,
+.ranking-card,
+.ranking-card-body {
   overflow-wrap: anywhere;
   word-break: normal;
 }
@@ -942,7 +1029,8 @@ button {
 .suggestion-compact-main > span,
 .suggestion-body p,
 .quest-results p,
-.quest-notes p {
+.quest-notes p,
+.ranking-card-body p {
   min-width: 0;
   max-width: 100%;
   line-height: 1.42;

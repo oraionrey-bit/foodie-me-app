@@ -108,7 +108,11 @@ test('quests, ranks, and AI tabs show cleanup placeholders and actions', async (
 
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Ranks', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Rankings' })).toBeVisible()
-  await expect(page.getByText('Ranking cards will come back when we are ready to compare favorites.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Best saved bites' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No shared favorites yet' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open quests' }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Research a quest' }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open Cook' })).toBeVisible()
 
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'AI', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Research a quest' })).toBeVisible()
@@ -117,6 +121,125 @@ test('quests, ranks, and AI tabs show cleanup placeholders and actions', async (
   await page.getByRole('button', { name: 'Save recipe' }).click()
   await expect(page.getByRole('heading', { name: 'Cook', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Save a recipe idea' })).toBeVisible()
+})
+
+test('rankings derive useful sections from quest ratings and loved recipes', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'quest-rankings',
+        city: 'Los Angeles',
+        topic: 'Date-night noodles',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit'],
+        createdAt: '2026-06-10T00:00:00.000Z',
+        updatedAt: '2026-06-10T00:00:00.000Z',
+        result: {
+          summary: 'Noodle research.',
+          suggestions: [
+            {
+              name: 'Pine & Crane',
+              neighborhood: 'Silver Lake',
+              what_to_order: 'Dan dan noodles and thousand layer pancake',
+              confidence: 'high',
+              ratings: {
+                tina: { status: 'tried_liked', score: 5, updatedAt: '2026-06-10T00:02:00.000Z' },
+                anthony: { status: 'tried_liked', score: 4, updatedAt: '2026-06-10T00:03:00.000Z' },
+              },
+            },
+            {
+              name: 'Marugame Monzo',
+              neighborhood: 'Little Tokyo',
+              what_to_order: 'Mentai cream udon',
+              confidence: 'medium',
+              ratings: {
+                tina: { score: 5, updatedAt: '2026-06-10T00:04:00.000Z' },
+              },
+            },
+            {
+              name: 'Ramen Nagi',
+              neighborhood: 'Century City',
+              what_to_order: 'Red King',
+              confidence: 'high',
+              ratings: {
+                anthony: { status: 'tried_liked', updatedAt: '2026-06-10T00:05:00.000Z' },
+              },
+            },
+          ],
+        },
+      },
+    ]))
+    window.localStorage.setItem('foodie-me-recipes-v3', JSON.stringify([
+      {
+        id: 'loved-rankings-recipe',
+        title: 'Weekend miso pancakes',
+        description: 'Fluffy pancakes with a little savory edge.',
+        sourceType: 'manual',
+        status: 'loved',
+        categories: ['breakfast'],
+        tags: ['keeper'],
+        ingredients: [{ id: 'i1', text: 'Miso' }],
+        steps: [{ id: 's1', text: 'Cook pancakes' }],
+        notes: 'Tina and Anthony both wanted these again.',
+        capturedAt: '2026-06-11T00:00:00.000Z',
+        updatedAt: '2026-06-11T00:00:00.000Z',
+        verdicts: [],
+      },
+    ]))
+  })
+
+  await page.goto('/')
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Ranks', exact: true }).click()
+
+  await expect(page.getByRole('heading', { name: 'Both-loved picks' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Tina-liked picks' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Anthony-liked picks' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Loved recipes' })).toBeVisible()
+  await expect(page.locator('.ranking-section').filter({ has: page.getByRole('heading', { name: 'Both-loved picks' }) })).toContainText('Pine & Crane')
+  await expect(page.locator('.ranking-section').filter({ has: page.getByRole('heading', { name: 'Both-loved picks' }) })).toContainText('Both liked it · high confidence')
+  await expect(page.locator('.ranking-section').filter({ has: page.getByRole('heading', { name: 'Tina-liked picks' }) })).toContainText('Marugame Monzo')
+  await expect(page.locator('.ranking-section').filter({ has: page.getByRole('heading', { name: 'Anthony-liked picks' }) })).toContainText('Ramen Nagi')
+  await expect(page.locator('.ranking-section').filter({ has: page.getByRole('heading', { name: 'Loved recipes' }) })).toContainText('Weekend miso pancakes')
+  await expect(page.getByText('Ranks are on hold')).toHaveCount(0)
+  await expectNoHorizontalOverflow(page)
+})
+
+test('rankings stay mobile friendly with long saved ranking text', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 812 })
+  await page.addInitScript(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'quest-rankings-mobile',
+        city: 'Los Angeles with a very long city-region name that still wraps',
+        topic: 'Very long shared favorite quest topic with lots of descriptive words',
+        status: 'ready',
+        statusMessage: 'Research ready',
+        sources: ['Reddit'],
+        createdAt: '2026-06-12T00:00:00.000Z',
+        updatedAt: '2026-06-12T00:00:00.000Z',
+        result: {
+          suggestions: [
+            {
+              name: 'A Very Long Restaurant Name With A SuperLongUnbrokenRankingTokenThatMustWrap',
+              neighborhood: 'A long neighborhood and cross-street description',
+              what_to_order: 'A very long signature order with SuperLongUnbrokenOrderTokenThatShouldNotCreateSideScroll',
+              confidence: 'high',
+              ratings: {
+                tina: { status: 'tried_liked', score: 5, updatedAt: '2026-06-12T00:01:00.000Z' },
+                anthony: { status: 'tried_liked', score: 5, updatedAt: '2026-06-12T00:02:00.000Z' },
+              },
+            },
+          ],
+        },
+      },
+    ]))
+  })
+
+  await page.goto('/')
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Ranks', exact: true }).click()
+  await expect(page.locator('.ranking-section').filter({ has: page.getByRole('heading', { name: 'Both-loved picks' }) })).toContainText(/SuperLongUnbrokenRankingToken/)
+  await expectNoHorizontalOverflow(page)
 })
 
 test('AI Research a quest sends a source-backed quest request to Oraion and shows results', async ({ page }) => {
