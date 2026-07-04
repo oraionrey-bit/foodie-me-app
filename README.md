@@ -13,6 +13,8 @@ This is the first public web preview:
 
 ## Commands
 
+Use Node 24 for local installs and builds. The repo includes `.nvmrc`, and CI/deploy workflows also run Node 24.
+
 ```bash
 npm install
 npm run dev
@@ -32,7 +34,7 @@ The deploy workflow:
 2. runs typecheck
 3. builds Vite output into `dist/`
 4. prepares Pages artifacts with `.nojekyll` and `404.html`
-5. runs Playwright smoke tests
+5. runs Playwright tests across desktop Chromium, mobile Chromium, and tablet WebKit
 6. deploys `dist/` to GitHub Pages
 
 ## Product direction
