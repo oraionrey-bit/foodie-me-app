@@ -481,6 +481,10 @@ function recipeMeta(recipe: Recipe) {
   return parts.filter(Boolean).join(' · ')
 }
 
+function compactPreview(value: string, maxLength = 140) {
+  return value.length > maxLength ? `${value.slice(0, maxLength).trim()}…` : value
+}
+
 function normalizeRelayQuestStatus(value: unknown): QuestResearchStatus {
   const status = normalizeQuestStatus(value)
   return status === 'local' ? 'queued' : status
@@ -584,18 +588,36 @@ function App() {
   const [questError, setQuestError] = useState('')
   const [confirmingDeleteQuestId, setConfirmingDeleteQuestId] = useState<string | null>(null)
   const [ratingSaveState, setRatingSaveState] = useState<Record<string, 'saving' | 'saved' | 'local' | 'error'>>({})
+  const recipesRef = useRef(recipes)
+  const recipeStorageTimeoutRef = useRef<number | undefined>(undefined)
+  const questStorageTimeoutRef = useRef<number | undefined>(undefined)
   const ratingSyncSequenceRef = useRef<Record<string, number>>({})
+  const relayRatingTimeoutRef = useRef<Record<string, number>>({})
+  const questRequestsRef = useRef(questRequests)
+
+  function scheduleStorageWrite<T>(timeoutRef: { current: number | undefined }, key: string, value: T) {
+    window.clearTimeout(timeoutRef.current)
+    timeoutRef.current = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(key, JSON.stringify(value))
+      } catch {
+        // Static app stays usable even if browser storage is unavailable.
+      }
+    }, 0)
+  }
 
   function persistQuestRequests(nextOrUpdater: QuestResearch[] | ((current: QuestResearch[]) => QuestResearch[])) {
-    setQuestRequests((current) => {
-      const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(current) : nextOrUpdater
-      try {
-        window.localStorage.setItem(questResearchStorageKey, JSON.stringify(next))
-      } catch {
-        // Keep the static app usable even if quest storage is unavailable.
-      }
-      return next
-    })
+    const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(questRequestsRef.current) : nextOrUpdater
+    questRequestsRef.current = next
+    setQuestRequests(next)
+    scheduleStorageWrite(questStorageTimeoutRef, questResearchStorageKey, next)
+  }
+
+  function updateRecipes(nextOrUpdater: Recipe[] | ((current: Recipe[]) => Recipe[])) {
+    const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(recipesRef.current) : nextOrUpdater
+    recipesRef.current = next
+    setRecipes(next)
+    scheduleStorageWrite(recipeStorageTimeoutRef, storageKey, next)
   }
 
   const title = useMemo(() => {
@@ -606,27 +628,53 @@ function App() {
     return 'AI research'
   }, [activeTab])
 
-  const toTryCount = recipes.filter((recipe) => recipe.status === 'to_try').length
-  const lovedCount = recipes.filter((recipe) => recipe.status === 'loved').length
-  const selectedRecipe = recipes.find((recipe) => recipe.id === selectedRecipeId) ?? null
-  const selectedRecipeSafeSourceUrl = safeExternalUrl(selectedRecipe?.sourceUrl)
+  const recipeStats = useMemo(() => ({
+    toTryCount: recipes.filter((recipe) => recipe.status === 'to_try').length,
+    lovedCount: recipes.filter((recipe) => recipe.status === 'loved').length,
+  }), [recipes])
+  const { toTryCount, lovedCount } = recipeStats
+  const selectedRecipe = useMemo(() => recipes.find((recipe) => recipe.id === selectedRecipeId) ?? null, [recipes, selectedRecipeId])
+  const selectedRecipeSafeSourceUrl = useMemo(() => safeExternalUrl(selectedRecipe?.sourceUrl), [selectedRecipe?.sourceUrl])
   const activeQuestRequest = questRequests[0] ?? null
-  const activeQuestCount = questRequests.length
-  const activeQuestPickCount = activeQuestRequest?.result?.suggestions?.length ?? 0
-  const ratedPicksCount = questRequests.reduce((count, quest) => count + (quest.result?.suggestions?.filter((suggestion) => ratingBadgeLabels(suggestion.ratings).length > 0).length ?? 0), 0)
-  const ratingNotesCount = questRequests.reduce((count, quest) => count + (quest.result?.suggestions?.reduce((suggestionCount, suggestion) => (
-    suggestionCount + ratingOwners.filter((owner) => Boolean(suggestion.ratings?.[owner]?.notes)).length
-  ), 0) ?? 0), 0)
-  const latestRatingUpdatedAt = questRequests
-    .flatMap((quest) => quest.result?.suggestions?.flatMap((suggestion) => ratingOwners.map((owner) => suggestion.ratings?.[owner]?.updatedAt).filter((date): date is string => Boolean(date))) ?? [])
-    .sort()
-    .at(-1)
+  const questStats = useMemo(() => {
+    let ratedPicks = 0
+    let ratingNotes = 0
+    let latestRating = ''
 
-  const visibleRecipes = recipes.filter((recipe) => {
+    questRequests.forEach((quest) => {
+      quest.result?.suggestions?.forEach((suggestion) => {
+        if (ratingBadgeLabels(suggestion.ratings).length > 0) ratedPicks += 1
+        ratingOwners.forEach((owner) => {
+          const rating = suggestion.ratings?.[owner]
+          if (rating?.notes) ratingNotes += 1
+          if (rating?.updatedAt && rating.updatedAt > latestRating) latestRating = rating.updatedAt
+        })
+      })
+    })
+
+    return {
+      activeQuestCount: questRequests.length,
+      activeQuestPickCount: questRequests[0]?.result?.suggestions?.length ?? 0,
+      ratedPicksCount: ratedPicks,
+      ratingNotesCount: ratingNotes,
+      latestRatingUpdatedAt: latestRating || undefined,
+    }
+  }, [questRequests])
+  const { activeQuestCount, activeQuestPickCount, ratedPicksCount, ratingNotesCount, latestRatingUpdatedAt } = questStats
+
+  const visibleRecipes = useMemo(() => recipes.filter((recipe) => {
     const statusMatches = recipe.status === statusFilter
     const categoryMatches = categoryFilter === 'all' || recipe.categories.includes(categoryFilter)
     return statusMatches && categoryMatches
-  })
+  }), [categoryFilter, recipes, statusFilter])
+  const pollableQuestKey = useMemo(() => questRequests.filter(isPollableQuest).map((quest) => [
+    quest.id,
+    quest.relayId,
+    quest.statusToken,
+    quest.status,
+    quest.updatedAt,
+    quest.syncedReadyAt,
+  ].join(':')).join('|'), [questRequests])
 
   useEffect(() => {
     if (expandedQuestsInitialized) return
@@ -635,27 +683,25 @@ function App() {
   }, [expandedQuestsInitialized, questRequests])
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(recipes))
-    } catch {
-      // Static demo should keep working even if storage is unavailable.
-    }
+    recipesRef.current = recipes
   }, [recipes])
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(questResearchStorageKey, JSON.stringify(questRequests))
-    } catch {
-      // Keep the static app usable even if quest storage is unavailable.
-    }
+    questRequestsRef.current = questRequests
   }, [questRequests])
 
+  useEffect(() => () => {
+    window.clearTimeout(recipeStorageTimeoutRef.current)
+    window.clearTimeout(questStorageTimeoutRef.current)
+    Object.values(relayRatingTimeoutRef.current).forEach((timeout) => window.clearTimeout(timeout))
+  }, [])
+
   useEffect(() => {
-    const pollableQuests = questRequests.filter(isPollableQuest)
-    if (pollableQuests.length === 0) return undefined
+    if (!pollableQuestKey) return undefined
 
     let cancelled = false
     async function pollQuestStatuses() {
+      const pollableQuests = questRequestsRef.current.filter(isPollableQuest)
       const updates = await Promise.allSettled(
         pollableQuests.map(async (quest) => ({ questId: quest.id, status: await fetchQuestStatus(quest) })),
       )
@@ -696,7 +742,7 @@ function App() {
       cancelled = true
       window.clearInterval(interval)
     }
-  }, [questRequests])
+  }, [pollableQuestKey])
 
   function openCookTab(showForm = false) {
     setActiveTab('cook')
@@ -819,27 +865,37 @@ function App() {
 
     if (!questForSync?.relayId || !questForSync.statusToken) return
 
-    void patchRelayQuestRating(questForSync, targetSuggestionKey, owner, ratingForSync)
-      .then((remote) => {
-        if (ratingSyncSequenceRef.current[saveKey] !== syncSequence) return
-        persistQuestRequests((current) => current.map((quest) => {
-          if (quest.id !== questId) return quest
-          return {
-            ...quest,
-            status: remote.status,
-            statusMessage: remote.statusMessage,
-            error: remote.error,
-            result: remote.result ?? quest.result,
-            updatedAt: remote.updatedAt,
-            syncedReadyAt: remote.status === 'ready' ? remote.updatedAt : quest.syncedReadyAt,
-          }
-        }))
-        setRatingSaveState((current) => ({ ...current, [saveKey]: 'saved' }))
-      })
-      .catch(() => {
-        if (ratingSyncSequenceRef.current[saveKey] !== syncSequence) return
-        setRatingSaveState((current) => ({ ...current, [saveKey]: 'error' }))
-      })
+    const syncRating = () => {
+      void patchRelayQuestRating(questForSync, targetSuggestionKey, owner, ratingForSync)
+        .then((remote) => {
+          if (ratingSyncSequenceRef.current[saveKey] !== syncSequence) return
+          persistQuestRequests((current) => current.map((quest) => {
+            if (quest.id !== questId) return quest
+            return {
+              ...quest,
+              status: remote.status,
+              statusMessage: remote.statusMessage,
+              error: remote.error,
+              result: remote.result ?? quest.result,
+              updatedAt: remote.updatedAt,
+              syncedReadyAt: remote.status === 'ready' ? remote.updatedAt : quest.syncedReadyAt,
+            }
+          }))
+          setRatingSaveState((current) => ({ ...current, [saveKey]: 'saved' }))
+        })
+        .catch(() => {
+          if (ratingSyncSequenceRef.current[saveKey] !== syncSequence) return
+          setRatingSaveState((current) => ({ ...current, [saveKey]: 'error' }))
+        })
+    }
+
+    if ('notes' in ratingPatch) {
+      window.clearTimeout(relayRatingTimeoutRef.current[saveKey])
+      relayRatingTimeoutRef.current[saveKey] = window.setTimeout(syncRating, 450)
+      return
+    }
+
+    syncRating()
   }
 
   function requestDeleteQuest(questId: string) {
@@ -931,7 +987,7 @@ function App() {
       verdicts: [],
     }
 
-    setRecipes((current) => [recipe, ...current])
+    updateRecipes((current) => [recipe, ...current])
     setNewRecipe(blankForm)
     setFormError('')
     setShowSaveForm(false)
@@ -941,7 +997,7 @@ function App() {
 
   function updateRecipeStatus(recipeId: string, status: RecipeStatus) {
     const now = new Date().toISOString()
-    setRecipes((current) =>
+    updateRecipes((current) =>
       current.map((recipe) => {
         if (recipe.id !== recipeId) return recipe
 
@@ -971,7 +1027,7 @@ function App() {
     const confirmed = window.confirm('Delete this recipe from Foodie Me?')
     if (!confirmed) return
 
-    setRecipes((current) => current.filter((recipe) => recipe.id !== recipeId))
+    updateRecipes((current) => current.filter((recipe) => recipe.id !== recipeId))
     setSelectedRecipeId(null)
     setStatusFilter('to_try')
   }
@@ -1296,8 +1352,8 @@ function App() {
                                 <strong>Research plan:</strong> crowd + editorial first; official pages are not proof.
                               </aside>
                               {quest.result.suggestions && quest.result.suggestions.length > 0 && (
-                                <div className="quest-suggestion-list">
-                                  {quest.result.suggestions.map((suggestion, index) => {
+                                <div className="quest-suggestion-list" aria-label="Restaurant suggestions">
+                                  {quest.result.suggestions.slice(0, 5).map((suggestion, index) => {
                                     const key = suggestionKey(quest.id, suggestion, index)
                                     const isSuggestionExpanded = expandedSuggestionIds.has(key)
                                     const ratingLabels = ratingBadgeLabels(suggestion.ratings)
@@ -1316,7 +1372,7 @@ function App() {
                                             {suggestion.what_to_order && (
                                               <span className="suggestion-order-preview">
                                                 <span className="suggestion-field-label">Order</span>
-                                                <span>{suggestion.what_to_order}</span>
+                                                <span>{compactPreview(suggestion.what_to_order)}</span>
                                               </span>
                                             )}
                                           </span>
@@ -1409,6 +1465,9 @@ function App() {
                                       </article>
                                     )
                                   })}
+                                  {quest.result.suggestions.length > 5 && (
+                                    <p className="muted-list-note">Showing the first 5 of {quest.result.suggestions.length} picks to keep this quest quick on mobile.</p>
+                                  )}
                                 </div>
                               )}
                             </section>

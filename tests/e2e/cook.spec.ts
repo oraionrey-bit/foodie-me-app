@@ -70,6 +70,7 @@ test('saving a manual recipe and marking it loved updates filters', async ({ pag
   await page.getByRole('button', { name: 'Add to To Try' }).click()
 
   await expect(page.getByRole('heading', { name: 'Crispy rice salad' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem('foodie-me-recipes-v3')?.includes('Crispy rice salad') ?? false)).toBe(true)
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Cook', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Crispy rice salad' })).toBeVisible()
@@ -93,6 +94,7 @@ test('delete verdict removes a recipe from the queue', async ({ page }) => {
   await page.getByRole('button', { name: 'Delete' }).click()
 
   await expect(page.getByRole('heading', { name: 'Curry-flavored grilled mackerel bento' })).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem('foodie-me-recipes-v3')?.includes('Curry-flavored grilled mackerel bento') ?? true)).toBe(false)
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Cook', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Curry-flavored grilled mackerel bento' })).toHaveCount(0)

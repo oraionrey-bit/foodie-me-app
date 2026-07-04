@@ -647,6 +647,7 @@ test('quest delete confirms, cancels, removes local card, and calls relay delete
   await expect(page.getByRole('button', { name: /Dumplings in Los Angeles/ })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'No quest cards yet' })).toBeVisible()
   await expect.poll(() => deleteCalls).toBe(1)
+  await expect.poll(() => page.evaluate(() => JSON.parse(window.localStorage.getItem('foodie-me-quest-research-v2') || '[]').length)).toBe(0)
 
   const storedQuestCount = await page.evaluate(() => JSON.parse(window.localStorage.getItem('foodie-me-quest-research-v2') || '[]').length)
   expect(storedQuestCount).toBe(0)
