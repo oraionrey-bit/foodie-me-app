@@ -18,11 +18,25 @@ Use Node 24 for local installs and builds. The repo includes `.nvmrc`, and CI/de
 ```bash
 npm install
 npm run dev
+npm run lint
 npm run typecheck
 npm run build:pages
 npm run test:e2e
 npm run verify
 ```
+
+Useful targeted checks:
+
+```bash
+npm run test:e2e:desktop
+npm run test:e2e:mobile
+npm run test:e2e:tablet
+npm run test:e2e:chromium
+npm run deploy:check
+npm run ci:local
+```
+
+Use `npm run deploy:check` for a faster local deployment sanity check before pushing. Use `npm run ci:local` for the full CI-style verification.
 
 ## Deployment
 

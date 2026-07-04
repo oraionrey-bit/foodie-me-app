@@ -10,10 +10,17 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
+    "lint": "oxlint .",
     "preview": "vite preview",
     "build:pages": "npm run build && node scripts/prepare-pages-build.mjs",
     "test:e2e": "playwright test",
-    "verify": "npm run typecheck && npm run build:pages && npm run test:e2e"
+    "test:e2e:desktop": "playwright test --project=desktop-chrome",
+    "test:e2e:mobile": "playwright test --project=mobile-chrome",
+    "test:e2e:tablet": "playwright test --project=tablet-webkit",
+    "test:e2e:chromium": "playwright test --project=desktop-chrome --project=mobile-chrome",
+    "deploy:check": "npm run typecheck && npm run build:pages && npm run test:e2e:mobile",
+    "ci:local": "npm run verify",
+    "verify": "npm run lint && npm run typecheck && npm run build:pages && npm run test:e2e"
   },
   "dependencies": {
     "react": "^19.2.7",
