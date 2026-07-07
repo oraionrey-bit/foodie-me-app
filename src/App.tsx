@@ -100,6 +100,9 @@ const legacyStorageKey = 'foodie-me-recipes-v2'
 const oldestRecipeStorageKey = 'foodie-me-recipes-v1'
 const questResearchStorageKey = 'foodie-me-quest-research-v2'
 const legacyQuestResearchStorageKey = 'foodie-me-quest-research-v1'
+const storageWriteDelayMs = 650
+const recipePageSize = 20
+const questPageSize = 10
 const foodieRelayBaseUrl = (import.meta.env.VITE_FOODIE_RELAY_URL || 'https://chat.withluna.dev').replace(/\/$/, '')
 const recipeStatuses: RecipeStatus[] = ['to_try', 'loved']
 const legacyMockRecipeIds = new Set([
@@ -589,33 +592,57 @@ function App() {
   const [questError, setQuestError] = useState('')
   const [confirmingDeleteQuestId, setConfirmingDeleteQuestId] = useState<string | null>(null)
   const [ratingSaveState, setRatingSaveState] = useState<Record<string, 'saving' | 'saved' | 'local' | 'error'>>({})
+  const [recipeVisibleLimit, setRecipeVisibleLimit] = useState(recipePageSize)
+  const [questVisibleLimit, setQuestVisibleLimit] = useState(questPageSize)
   const recipesRef = useRef(recipes)
   const recipeStorageTimeoutRef = useRef<number | undefined>(undefined)
   const questStorageTimeoutRef = useRef<number | undefined>(undefined)
+  const pendingStorageWritesRef = useRef(new Map<string, unknown>())
   const ratingSyncSequenceRef = useRef<Record<string, number>>({})
   const relayRatingTimeoutRef = useRef<Record<string, number>>({})
   const questRequestsRef = useRef(questRequests)
 
-  function scheduleStorageWrite<T>(timeoutRef: { current: number | undefined }, key: string, value: T) {
+  function flushStorageWrite(timeoutRef: { current: number | undefined }, key: string) {
     window.clearTimeout(timeoutRef.current)
-    timeoutRef.current = window.setTimeout(() => {
-      try {
-        window.localStorage.setItem(key, JSON.stringify(value))
-      } catch {
-        // Static app stays usable even if browser storage is unavailable.
-      }
-    }, 0)
+    timeoutRef.current = undefined
+
+    if (!pendingStorageWritesRef.current.has(key)) return
+
+    const value = pendingStorageWritesRef.current.get(key)
+    pendingStorageWritesRef.current.delete(key)
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value))
+    } catch {
+      // Static app stays usable even if browser storage is unavailable.
+    }
+  }
+
+  function flushPendingStorageWrites() {
+    flushStorageWrite(recipeStorageTimeoutRef, storageKey)
+    flushStorageWrite(questStorageTimeoutRef, questResearchStorageKey)
+  }
+
+  function scheduleStorageWrite<T>(timeoutRef: { current: number | undefined }, key: string, value: T) {
+    pendingStorageWritesRef.current.set(key, value)
+    window.clearTimeout(timeoutRef.current)
+    timeoutRef.current = window.setTimeout(() => flushStorageWrite(timeoutRef, key), storageWriteDelayMs)
   }
 
   function persistQuestRequests(nextOrUpdater: QuestResearch[] | ((current: QuestResearch[]) => QuestResearch[])) {
-    const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(questRequestsRef.current) : nextOrUpdater
+    const current = questRequestsRef.current
+    const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(current) : nextOrUpdater
+    if (next === current) return
+
     questRequestsRef.current = next
     setQuestRequests(next)
     scheduleStorageWrite(questStorageTimeoutRef, questResearchStorageKey, next)
   }
 
   function updateRecipes(nextOrUpdater: Recipe[] | ((current: Recipe[]) => Recipe[])) {
-    const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(recipesRef.current) : nextOrUpdater
+    const current = recipesRef.current
+    const next = typeof nextOrUpdater === 'function' ? nextOrUpdater(current) : nextOrUpdater
+    if (next === current) return
+
     recipesRef.current = next
     setRecipes(next)
     scheduleStorageWrite(recipeStorageTimeoutRef, storageKey, next)
@@ -638,6 +665,16 @@ function App() {
   const selectedRecipeSafeSourceUrl = useMemo(() => safeExternalUrl(selectedRecipe?.sourceUrl), [selectedRecipe?.sourceUrl])
   const activeQuestRequest = questRequests[0] ?? null
   const questStats = useMemo(() => {
+    if (activeTab !== 'home') {
+      return {
+        activeQuestCount: 0,
+        activeQuestPickCount: 0,
+        ratedPicksCount: 0,
+        ratingNotesCount: 0,
+        latestRatingUpdatedAt: undefined,
+      }
+    }
+
     let ratedPicks = 0
     let ratingNotes = 0
     let latestRating = ''
@@ -660,15 +697,21 @@ function App() {
       ratingNotesCount: ratingNotes,
       latestRatingUpdatedAt: latestRating || undefined,
     }
-  }, [questRequests])
+  }, [activeTab, questRequests])
   const { activeQuestCount, activeQuestPickCount, ratedPicksCount, ratingNotesCount, latestRatingUpdatedAt } = questStats
-  const rankingSections = useMemo(() => buildRankingSections(questRequests, recipes), [questRequests, recipes])
+  const rankingSections = useMemo(() => (
+    activeTab === 'rankings' ? buildRankingSections(questRequests, recipes) : []
+  ), [activeTab, questRequests, recipes])
 
-  const visibleRecipes = useMemo(() => recipes.filter((recipe) => {
+  const visibleRecipes = useMemo(() => activeTab === 'cook' ? recipes.filter((recipe) => {
     const statusMatches = recipe.status === statusFilter
     const categoryMatches = categoryFilter === 'all' || recipe.categories.includes(categoryFilter)
     return statusMatches && categoryMatches
-  }), [categoryFilter, recipes, statusFilter])
+  }) : [], [activeTab, categoryFilter, recipes, statusFilter])
+  const displayedRecipes = useMemo(() => visibleRecipes.slice(0, recipeVisibleLimit), [recipeVisibleLimit, visibleRecipes])
+  const hasMoreRecipes = visibleRecipes.length > displayedRecipes.length
+  const visibleQuestRequests = useMemo(() => questRequests.slice(0, questVisibleLimit), [questRequests, questVisibleLimit])
+  const hasMoreQuests = questRequests.length > visibleQuestRequests.length
   const pollableQuestKey = useMemo(() => questRequests.filter(isPollableQuest).map((quest) => [
     quest.id,
     quest.relayId,
@@ -680,9 +723,17 @@ function App() {
 
   useEffect(() => {
     if (expandedQuestsInitialized) return
-    if (questRequests[0]) setExpandedQuestIds(new Set([questRequests[0].id]))
+    if (questRequests.length > 0 && questRequests.length <= questPageSize) setExpandedQuestIds(new Set([questRequests[0].id]))
     setExpandedQuestsInitialized(true)
   }, [expandedQuestsInitialized, questRequests])
+
+  useEffect(() => {
+    setRecipeVisibleLimit(recipePageSize)
+  }, [categoryFilter, statusFilter])
+
+  useEffect(() => {
+    setQuestVisibleLimit(questPageSize)
+  }, [questRequests.length])
 
   useEffect(() => {
     recipesRef.current = recipes
@@ -692,10 +743,21 @@ function App() {
     questRequestsRef.current = questRequests
   }, [questRequests])
 
-  useEffect(() => () => {
-    window.clearTimeout(recipeStorageTimeoutRef.current)
-    window.clearTimeout(questStorageTimeoutRef.current)
-    Object.values(relayRatingTimeoutRef.current).forEach((timeout) => window.clearTimeout(timeout))
+  useEffect(() => {
+    const relayRatingTimeouts = relayRatingTimeoutRef.current
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushPendingStorageWrites()
+    }
+
+    window.addEventListener('pagehide', flushPendingStorageWrites)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('pagehide', flushPendingStorageWrites)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      flushPendingStorageWrites()
+      Object.values(relayRatingTimeouts).forEach((timeout) => window.clearTimeout(timeout))
+    }
   }, [])
 
   useEffect(() => {
@@ -709,30 +771,43 @@ function App() {
       )
       if (cancelled) return
 
-      persistQuestRequests((current) => current.map((quest) => {
-        const update = updates.find((item) => item.status === 'fulfilled' && item.value.questId === quest.id)
-        if (update?.status !== 'fulfilled') return quest
-        const next = update.value.status
-        const nextResult = mergeQuestResultRatings(quest.id, quest.result, next.result)
-        const nextSyncedReadyAt = next.status === 'ready' ? next.updatedAt : quest.syncedReadyAt
-        if (
-          quest.status === next.status
-          && quest.statusMessage === next.statusMessage
-          && quest.error === next.error
-          && quest.result === (nextResult ?? quest.result)
-          && quest.updatedAt === next.updatedAt
-          && quest.syncedReadyAt === nextSyncedReadyAt
-        ) return quest
-        return {
-          ...quest,
-          status: next.status,
-          statusMessage: next.statusMessage,
-          error: next.error,
-          result: nextResult ?? quest.result,
-          updatedAt: next.updatedAt,
-          syncedReadyAt: nextSyncedReadyAt,
-        }
-      }))
+      const updatesByQuestId = new Map(
+        updates
+          .filter((item): item is PromiseFulfilledResult<{ questId: string; status: Awaited<ReturnType<typeof fetchQuestStatus>> }> => item.status === 'fulfilled')
+          .map((item) => [item.value.questId, item.value.status] as const),
+      )
+
+      persistQuestRequests((current) => {
+        let changed = false
+        const nextQuests = current.map((quest) => {
+          const next = updatesByQuestId.get(quest.id)
+          if (!next) return quest
+
+          const nextResult = mergeQuestResultRatings(quest.id, quest.result, next.result)
+          const nextSyncedReadyAt = next.status === 'ready' ? next.updatedAt : quest.syncedReadyAt
+          const result = nextResult ?? quest.result
+          if (
+            quest.status === next.status
+            && quest.statusMessage === next.statusMessage
+            && quest.error === next.error
+            && quest.updatedAt === next.updatedAt
+            && quest.syncedReadyAt === nextSyncedReadyAt
+          ) return quest
+
+          changed = true
+          return {
+            ...quest,
+            status: next.status,
+            statusMessage: next.statusMessage,
+            error: next.error,
+            result,
+            updatedAt: next.updatedAt,
+            syncedReadyAt: nextSyncedReadyAt,
+          }
+        })
+
+        return changed ? nextQuests : current
+      })
     }
 
     pollQuestStatuses().catch(() => {})
@@ -1271,21 +1346,30 @@ function App() {
                 </div>
 
                 {visibleRecipes.length > 0 ? (
-                  <div className="recipe-list">
-                    {visibleRecipes.map((recipe) => (
-                      <article className="card recipe-card" key={recipe.id}>
-                        <div>
-                          <p className="eyebrow">{sourceLabel(recipe)}</p>
-                          <h3>{recipe.title}</h3>
-                          <p>{recipe.notes ?? recipe.description}</p>
-                        </div>
-                        <div className="recipe-card-footer">
-                          <span className="pill">{recipeMeta(recipe) || formatCategory(recipe.categories[0])}</span>
-                          <button type="button" onClick={() => setSelectedRecipeId(recipe.id)}>Open</button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
+                  <>
+                    <div className="recipe-list">
+                      {displayedRecipes.map((recipe) => (
+                        <article className="card recipe-card" key={recipe.id}>
+                          <div>
+                            <p className="eyebrow">{sourceLabel(recipe)}</p>
+                            <h3>{recipe.title}</h3>
+                            <p>{recipe.notes ?? recipe.description}</p>
+                          </div>
+                          <div className="recipe-card-footer">
+                            <span className="pill">{recipeMeta(recipe) || formatCategory(recipe.categories[0])}</span>
+                            <button type="button" onClick={() => setSelectedRecipeId(recipe.id)}>Open</button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                    {hasMoreRecipes && (
+                      <div className="list-more-action">
+                        <button type="button" onClick={() => setRecipeVisibleLimit((current) => current + recipePageSize)}>
+                          Show {Math.min(recipePageSize, visibleRecipes.length - displayedRecipes.length)} more recipes
+                        </button>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <article className="card empty-state">
                     <h3>{statusFilter === 'loved' ? 'No loved recipes here yet' : 'No recipes match these chips yet.'}</h3>
@@ -1302,7 +1386,7 @@ function App() {
           <section className="tab-page" aria-label="Food quests">
             {questRequests.length > 0 ? (
               <div className="quest-list">
-                {questRequests.map((quest) => {
+                {visibleQuestRequests.map((quest) => {
                   const isQuestExpanded = expandedQuestIds.has(quest.id)
                   const suggestionCount = quest.result?.suggestions?.length ?? 0
                   return (
@@ -1485,6 +1569,13 @@ function App() {
                     </article>
                   )
                 })}
+                {hasMoreQuests && (
+                  <div className="list-more-action">
+                    <button type="button" onClick={() => setQuestVisibleLimit((current) => current + questPageSize)}>
+                      Show {Math.min(questPageSize, questRequests.length - visibleQuestRequests.length)} more quests
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <article className="card empty-state">

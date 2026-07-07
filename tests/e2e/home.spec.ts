@@ -450,6 +450,38 @@ test('stored quests and restaurant suggestions are collapsible', async ({ page }
   await expect(page.getByRole('link', { name: 'Eater LA' })).toBeVisible()
 })
 
+test('long quest history renders in capped batches with show more', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    const quests = Array.from({ length: 12 }, (_, index) => ({
+      id: `quest-page-${index + 1}`,
+      city: 'Los Angeles',
+      topic: `Paging quest ${index + 1}`,
+      status: 'ready',
+      statusMessage: 'Research ready',
+      sources: ['Reddit'],
+      createdAt: `2026-06-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+      updatedAt: `2026-06-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+      result: {
+        summary: `Summary ${index + 1}`,
+        suggestions: [{ name: `Restaurant ${index + 1}`, neighborhood: 'Echo Park' }],
+      },
+    }))
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify(quests))
+  })
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+
+  await expect(page.getByRole('button', { name: /Paging quest 1 in Los Angeles/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Paging quest 10 in Los Angeles/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Paging quest 11 in Los Angeles/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Show 2 more quests' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Show 2 more quests' }).click()
+  await expect(page.getByRole('button', { name: /Paging quest 11 in Los Angeles/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Paging quest 12 in Los Angeles/ })).toBeVisible()
+})
+
 test('restaurant rating persists through questRequests storage', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await page.evaluate(() => {
@@ -524,11 +556,10 @@ test('note-only restaurant rating persists and shows a collapsed badge after rel
   await page.getByLabel('Tina note').fill('Try the double and fries.')
   await expect(page.getByText('Saved on this device')).toHaveCount(2)
 
-  const storedNote = await page.evaluate(() => {
+  await expect.poll(() => page.evaluate(() => {
     const stored = JSON.parse(window.localStorage.getItem('foodie-me-quest-research-v2') || '[]')
-    return stored[0].result.suggestions[0].ratings.tina.notes
-  })
-  expect(storedNote).toBe('Try the double and fries.')
+    return stored[0].result.suggestions[0].ratings?.tina?.notes
+  })).toBe('Try the double and fries.')
 
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()

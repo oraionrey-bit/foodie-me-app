@@ -135,16 +135,16 @@ function lovedRecipeItems(recipes: Recipe[]) {
 }
 
 export function buildRankingSections(quests: RankingQuest[], recipes: Recipe[]): RankingSection[] {
-  const restaurants = rankableRestaurantItems(quests)
-  const bothLoved = sortRestaurants(restaurants)
+  const sortedRestaurants = sortRestaurants(rankableRestaurantItems(quests))
+  const bothLoved = sortedRestaurants
     .filter((item) => isLiked(item.tina) && isLiked(item.anthony))
     .slice(0, 5)
     .map((item) => ({ ...item, reason: item.confidence ? `Both liked it · ${item.confidence} confidence` : 'Both liked it' }))
-  const tinaLiked = sortRestaurants(restaurants)
+  const tinaLiked = sortedRestaurants
     .filter((item) => isLiked(item.tina))
     .slice(0, 5)
     .map((item) => ({ ...item, reason: ownerReason('tina', item.tina) }))
-  const anthonyLiked = sortRestaurants(restaurants)
+  const anthonyLiked = sortedRestaurants
     .filter((item) => isLiked(item.anthony))
     .slice(0, 5)
     .map((item) => ({ ...item, reason: ownerReason('anthony', item.anthony) }))

@@ -54,6 +54,39 @@ test('cook tab starts with Shizuku recipes in To try and empty Loved', async ({ 
   await expect(page.getByRole('heading', { name: 'No loved recipes here yet' })).toBeVisible()
 })
 
+test('long recipe queue renders in capped batches with show more', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    const recipes = Array.from({ length: 25 }, (_, index) => ({
+      id: `recipe-page-${index + 1}`,
+      title: `Paging recipe ${index + 1}`,
+      description: `Recipe description ${index + 1}`,
+      sourceType: 'manual',
+      sourceLabel: 'Manual save',
+      status: 'to_try',
+      categories: ['weeknight'],
+      tags: ['saved'],
+      ingredients: [{ id: 'i1', text: 'Ingredient' }],
+      steps: [{ id: 's1', text: 'Step' }],
+      capturedAt: `2026-06-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+      updatedAt: `2026-06-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+      verdicts: [],
+    }))
+    window.localStorage.setItem('foodie-me-recipes-v3', JSON.stringify(recipes))
+  })
+  await page.reload()
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Cook', exact: true }).click()
+
+  await expect(page.getByRole('heading', { name: 'Paging recipe 1', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Paging recipe 20', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Paging recipe 21', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Show 5 more recipes' })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Show 5 more recipes' }).click()
+  await expect(page.getByRole('heading', { name: 'Paging recipe 21', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Paging recipe 25', exact: true })).toBeVisible()
+})
+
 test('saving a manual recipe and marking it loved updates filters', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Cook', exact: true }).click()
