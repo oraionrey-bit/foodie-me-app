@@ -717,7 +717,7 @@ function App() {
     quest.relayId,
     quest.statusToken,
     quest.status,
-    quest.updatedAt,
+    quest.result ? 'has-result' : 'no-result',
     quest.syncedReadyAt,
   ].join(':')).join('|'), [questRequests])
 

@@ -390,6 +390,47 @@ test('stored relay error quests recover when server status is ready', async ({ p
   await expect(page.getByText('Oraion research worker returned invalid JSON.')).toHaveCount(0)
 })
 
+test('researching quests poll on interval instead of looping on changing timestamps', async ({ page }) => {
+  let statusCalls = 0
+  await page.route('https://chat.withluna.dev/foodie/quests/foodie-loop-guard/status?token=loop-token', async (route) => {
+    statusCalls += 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'foodie-loop-guard',
+        status: 'researching',
+        status_message: 'Oraion is still checking source-backed picks.',
+        updated_at: new Date().toISOString(),
+      }),
+    })
+  })
+
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    window.localStorage.setItem('foodie-me-quest-research-v2', JSON.stringify([
+      {
+        id: 'local-loop-guard',
+        relayId: 'foodie-loop-guard',
+        statusToken: 'loop-token',
+        city: 'Los Angeles',
+        topic: 'Tacos',
+        status: 'researching',
+        statusMessage: 'Oraion is still checking source-backed picks.',
+        sources: ['Reddit', 'Eater LA'],
+        createdAt: '2026-06-03T00:00:00.000Z',
+        updatedAt: '2026-06-03T00:00:01.000Z',
+      },
+    ]))
+  })
+  await page.reload()
+  await page.waitForTimeout(1200)
+  await expect.poll(() => statusCalls).toBeLessThanOrEqual(2)
+
+  await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await expect(page.getByRole('button', { name: /Tacos in Los Angeles/ })).toBeVisible()
+})
+
 test('stored quests and restaurant suggestions are collapsible', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await page.evaluate(() => {
