@@ -723,7 +723,10 @@ function App() {
 
   useEffect(() => {
     if (expandedQuestsInitialized) return
-    if (questRequests.length > 0 && questRequests.length <= questPageSize) setExpandedQuestIds(new Set([questRequests[0].id]))
+    const latestQuest = questRequests[0]
+    if (latestQuest && questRequests.length <= questPageSize && latestQuest.status !== 'ready') {
+      setExpandedQuestIds(new Set([latestQuest.id]))
+    }
     setExpandedQuestsInitialized(true)
   }, [expandedQuestsInitialized, questRequests])
 

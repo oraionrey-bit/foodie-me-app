@@ -478,6 +478,9 @@ test('stored quests and restaurant suggestions are collapsible', async ({ page }
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
 
+  await expect(page.getByRole('button', { name: /Pizza in Los Angeles/ })).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByText('New pizza summary.')).toHaveCount(0)
+  await page.getByRole('button', { name: /Pizza in Los Angeles/ }).click()
   await expect(page.getByRole('button', { name: /Pizza in Los Angeles/ })).toHaveAttribute('aria-expanded', 'true')
   await expect(page.getByText('New pizza summary.')).toBeVisible()
   await expect(page.getByRole('button', { name: /Bagels in Los Angeles/ })).toHaveAttribute('aria-expanded', 'false')
@@ -553,6 +556,7 @@ test('restaurant rating persists through questRequests storage', async ({ page }
   })
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Tacos in Los Angeles/ }).click()
   await page.getByRole('button', { name: /Sonoratown/ }).click()
   await page.getByLabel('Tina status').getByRole('button', { name: 'Want to try' }).click()
   await page.getByLabel('Tina optional score').getByRole('button', { name: '5' }).click()
@@ -563,6 +567,7 @@ test('restaurant rating persists through questRequests storage', async ({ page }
 
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Tacos in Los Angeles/ }).click()
   await expect(page.getByRole('button', { name: /Sonoratown/ })).toContainText('Tina: Want to try · 5/5')
   await expect(page.getByRole('button', { name: /Sonoratown/ })).toContainText('Anthony: Liked · 4/5')
   await page.getByRole('button', { name: /Sonoratown/ }).click()
@@ -592,6 +597,7 @@ test('note-only restaurant rating persists and shows a collapsed badge after rel
   })
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Burgers in Los Angeles/ }).click()
   await page.getByRole('button', { name: /Amboy/ }).click()
   await expect(page.getByText('Saved on this device')).toHaveCount(2)
   await page.getByLabel('Tina note').fill('Try the double and fries.')
@@ -604,6 +610,7 @@ test('note-only restaurant rating persists and shows a collapsed badge after rel
 
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Burgers in Los Angeles/ }).click()
   await expect(page.getByRole('button', { name: /Amboy/ })).toContainText('Tina: note saved')
   await page.getByRole('button', { name: /Amboy/ }).click()
   await expect(page.getByLabel('Tina note')).toHaveValue('Try the double and fries.')
@@ -672,6 +679,7 @@ test('relay-backed restaurant notes sync through Foodie relay and survive reload
   })
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Burgers in Los Angeles/ }).click()
   await page.getByRole('button', { name: /Amboy/ }).click()
   await expect(page.getByText('Synced through Foodie Me')).toHaveCount(2)
   await page.getByLabel('Tina note').fill('Relay synced note.')
@@ -680,6 +688,7 @@ test('relay-backed restaurant notes sync through Foodie relay and survive reload
 
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Burgers in Los Angeles/ }).click()
   await page.getByRole('button', { name: /Amboy/ }).click()
   await expect(page.getByLabel('Tina note')).toHaveValue('Relay synced note.')
 })
@@ -745,6 +754,7 @@ test('ready quests do one background refresh and keep local ratings', async ({ p
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
 
+  await page.getByRole('button', { name: /Pastries in Los Angeles/ }).click()
   await expect(page.getByText('Updated crowd/editorial-first research.')).toBeVisible()
   await expect(page.getByRole('button', { name: /Porto’s Bakery/ })).toContainText('Tina: Want to try · 5/5')
   await page.getByRole('button', { name: /Porto’s Bakery/ }).click()
@@ -791,6 +801,7 @@ test('duplicate restaurant names keep separate ratings', async ({ page }) => {
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
 
+  await page.getByRole('button', { name: /Pizza in Los Angeles/ }).click()
   const duplicateButtons = page.getByRole('button', { name: /Same Place/ })
   await expect(duplicateButtons).toHaveCount(2)
   await duplicateButtons.nth(0).click()
@@ -881,6 +892,7 @@ test('mobile quest cards wrap long quest and suggestion text within viewport', a
   })
   await page.reload()
   await page.getByRole('navigation', { name: 'Foodie Me tabs' }).getByRole('button', { name: 'Quests', exact: true }).click()
+  await page.getByRole('button', { name: /Extremely long crispy spicy noodle soup/ }).click()
   await page.getByRole('button', { name: /A Very Long Restaurant Name/ }).click()
 
   const questBox = await page.locator('.quest-card').first().boundingBox()
